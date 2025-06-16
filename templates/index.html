@@ -1,0 +1,541 @@
+{% extends "base.html" %}
+
+{% block title %}Main - DMX Lighting Control{% endblock %}
+
+{% block head %}
+<style>
+    .waveform-container {
+        width: 100%;
+        height: 200px;
+        border: 1px solid #ccc;
+        margin: 10px 0;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .sequence-container {
+        width: 100%;
+        height: 150px;
+        border: 1px solid #ccc;
+        margin: 10px 0;
+        position: relative;
+        overflow: hidden;
+        background: #f8f9fa;
+    }
+    
+    .sequence-track {
+        width: 100%;
+        height: 30px;
+        border-bottom: 1px solid #dee2e6;
+        position: relative;
+    }
+    
+    .sequence-event {
+        position: absolute;
+        height: 25px;
+        background: #007bff;
+        border-radius: 3px;
+        cursor: pointer;
+        color: white;
+        font-size: 12px;
+        padding: 2px 5px;
+        top: 2px;
+    }
+    
+    .timeline-markers {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+    
+    .timeline-marker {
+        position: absolute;
+        width: 1px;
+        height: 100%;
+        background: #666;
+        opacity: 0.3;
+    }
+    
+    .timeline-marker.major {
+        background: #333;
+        opacity: 0.7;
+        width: 2px;
+    }
+    
+    .timeline-label {
+        position: absolute;
+        bottom: 2px;
+        font-size: 10px;
+        color: #666;
+        transform: translateX(-50%);
+    }
+    
+    .playhead {
+        position: absolute;
+        top: 0;
+        width: 2px;
+        height: 100%;
+        background: #dc3545;
+        z-index: 10;
+        pointer-events: none;
+    }
+    
+    .light-preview {
+        width: 100%;
+        height: 300px;
+        border: 1px solid #ccc;
+        background: #000;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .light-fixture {
+        position: absolute;
+        width: 30px;
+        height: 30px;
+        border-radius: 15px;
+        border: 2px solid #fff;
+        cursor: pointer;
+        transition: all 0.1s ease;
+    }
+    
+    .control-panel {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 5px;
+        margin: 10px 0;
+    }
+    
+    .zoom-controls {
+        margin: 10px 0;
+    }
+    
+    .zoom-slider {
+        width: 100%;
+        margin: 5px 0;
+    }
+    
+    .sequence-expanded {
+        height: auto;
+        min-height: 150px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-music-note"></i> Audio & Sequence Editor</h5>
+                <div>
+                    <button class="btn btn-sm btn-primary" onclick="openFileDialog()">
+                        <i class="bi bi-upload"></i> Upload Audio
+                    </button>
+                    <button class="btn btn-sm btn-success" onclick="saveSequence()">
+                        <i class="bi bi-save"></i> Save
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- File Upload -->
+                <input type="file" id="audioFileInput" accept=".mp3,.wav,.flac,.aiff" style="display: none;" onchange="handleFileUpload(this)">
+                
+                <!-- Song Info -->
+                <div id="songInfo" class="mb-3" style="display: none;">
+                    <h6 id="songName">No song loaded</h6>
+                    <small id="songDuration" class="text-muted">Duration: 0:00</small>
+                </div>
+                
+                <!-- Zoom Controls -->
+                <div class="zoom-controls">
+                    <label for="zoomSlider" class="form-label">Zoom Level:</label>
+                    <input type="range" class="form-range zoom-slider" id="zoomSlider" min="1" max="100" value="1" onchange="updateZoom()">
+                    <div class="d-flex justify-content-between">
+                        <small>1x</small>
+                        <small>100x</small>
+                    </div>
+                </div>
+                
+                <!-- Waveform Display -->
+                <div class="waveform-container" id="waveformContainer">
+                    <canvas id="waveformCanvas" width="800" height="200"></canvas>
+                    <div class="timeline-markers" id="waveformMarkers"></div>
+                    <div class="playhead" id="waveformPlayhead" style="left: 0;"></div>
+                </div>
+                
+                <!-- Sequence Editor -->
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6>Sequence Editor</h6>
+                    <div>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="toggleSequenceExpanded()">
+                            <i class="bi bi-arrows-expand"></i> Expand
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary" onclick="addSequenceEvent()">
+                            <i class="bi bi-plus"></i> Add Event
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="sequence-container" id="sequenceContainer">
+                    <div id="sequenceTracks"></div>
+                    <div class="timeline-markers" id="sequenceMarkers"></div>
+                    <div class="playhead" id="sequencePlayhead" style="left: 0;"></div>
+                </div>
+                
+                <!-- Playback Controls -->
+                <div class="control-panel">
+                    <div class="row align-items-center">
+                        <div class="col-md-6">
+                            <div class="btn-group" role="group">
+                                <button class="btn btn-outline-primary" onclick="playSequence()">
+                                    <i class="bi bi-play"></i> Play
+                                </button>
+                                <button class="btn btn-outline-secondary" onclick="pauseSequence()">
+                                    <i class="bi bi-pause"></i> Pause
+                                </button>
+                                <button class="btn btn-outline-danger" onclick="stopSequence()">
+                                    <i class="bi bi-stop"></i> Stop
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="d-flex align-items-center">
+                                <span class="me-2">Position:</span>
+                                <span id="currentPosition">0:00</span>
+                                <span class="mx-2">/</span>
+                                <span id="totalDuration">0:00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-lightbulb"></i> Light Preview</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="light-preview" id="lightPreview">
+                    <!-- Light fixtures will be rendered here -->
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5><i class="bi bi-sliders"></i> Quick Controls</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Master Dimmer</label>
+                    <input type="range" class="form-range" id="masterDimmer" min="0" max="100" value="100" onchange="updateMasterDimmer()">
+                    <div class="d-flex justify-content-between">
+                        <small>0%</small>
+                        <small>100%</small>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Master Color</label>
+                    <input type="color" class="form-control form-control-color" id="masterColor" value="#ffffff" onchange="updateMasterColor()">
+                </div>
+                
+                <div class="d-grid">
+                    <button class="btn btn-warning" onclick="blackout()">
+                        <i class="bi bi-power"></i> Blackout
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Event Modal -->
+<div class="modal fade" id="eventModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Sequence Event</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="eventForm">
+                    <div class="mb-3">
+                        <label class="form-label">Time (seconds)</label>
+                        <input type="number" class="form-control" id="eventTime" min="0" step="0.1" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Devices</label>
+                        <div id="deviceList">
+                            <!-- Patched devices will be loaded here -->
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Event Type</label>
+                        <select class="form-select" id="eventType" onchange="updateEventFields()">
+                            <option value="dimmer">Dimmer</option>
+                            <option value="color">Color</option>
+                            <option value="position">Position</option>
+                        </select>
+                    </div>
+                    
+                    <div id="eventFields">
+                        <!-- Dynamic fields based on event type -->
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveEvent()">Save Event</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/waveform.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sequence-editor.js') }}"></script>
+<script src="{{ url_for('static', filename='js/light-preview.js') }}"></script>
+<script>
+    let currentSong = null;
+    let currentSequence = { events: [] };
+    let zoomLevel = 1;
+    let isExpanded = false;
+    let patchedDevices = [];
+    
+    // Initialize the application
+    document.addEventListener('DOMContentLoaded', function() {
+        initializeWaveform();
+        initializeSequenceEditor();
+        initializeLightPreview();
+        loadPatchedDevices();
+        setupEventListeners();
+    });
+    
+    function openFileDialog() {
+        document.getElementById('audioFileInput').click();
+    }
+    
+    function handleFileUpload(input) {
+        const file = input.files[0];
+        if (!file) return;
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        fetch('/api/upload-song', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert('Error: ' + data.error);
+                return;
+            }
+            
+            currentSong = data;
+            updateSongInfo();
+            renderWaveform(data.waveform_data);
+            updateTimeline();
+        })
+        .catch(error => {
+            console.error('Error uploading file:', error);
+            alert('Error uploading file');
+        });
+    }
+    
+    function updateSongInfo() {
+        if (!currentSong) return;
+        
+        document.getElementById('songName').textContent = currentSong.name;
+        document.getElementById('songDuration').textContent = `Duration: ${formatTime(currentSong.duration)}`;
+        document.getElementById('totalDuration').textContent = formatTime(currentSong.duration);
+        document.getElementById('songInfo').style.display = 'block';
+    }
+    
+    function formatTime(seconds) {
+        const minutes = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    function updateZoom() {
+        zoomLevel = parseInt(document.getElementById('zoomSlider').value);
+        updateTimeline();
+        renderWaveform();
+        renderSequence();
+    }
+    
+    function toggleSequenceExpanded() {
+        isExpanded = !isExpanded;
+        const container = document.getElementById('sequenceContainer');
+        container.classList.toggle('sequence-expanded', isExpanded);
+        renderSequence();
+    }
+    
+    function loadPatchedDevices() {
+        fetch('/api/patched-devices')
+            .then(response => response.json())
+            .then(data => {
+                patchedDevices = data;
+                renderLightFixtures();
+                updateDeviceList();
+            })
+            .catch(error => console.error('Error loading patched devices:', error));
+    }
+    
+    function addSequenceEvent() {
+        const modal = new bootstrap.Modal(document.getElementById('eventModal'));
+        modal.show();
+    }
+    
+    function updateEventFields() {
+        const eventType = document.getElementById('eventType').value;
+        const fieldsContainer = document.getElementById('eventFields');
+        
+        switch(eventType) {
+            case 'dimmer':
+                fieldsContainer.innerHTML = `
+                    <div class="mb-3">
+                        <label class="form-label">Dimmer Value (%)</label>
+                        <input type="range" class="form-range" id="dimmerValue" min="0" max="100" value="100">
+                        <div class="d-flex justify-content-between">
+                            <small>0%</small>
+                            <small>100%</small>
+                        </div>
+                    </div>
+                `;
+                break;
+            case 'color':
+                fieldsContainer.innerHTML = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label">Color</label>
+                            <input type="color" class="form-control form-control-color" id="colorValue" value="#ffffff">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">White</label>
+                            <input type="range" class="form-range" id="whiteValue" min="0" max="255" value="0">
+                        </div>
+                    </div>
+                `;
+                break;
+            case 'position':
+                fieldsContainer.innerHTML = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label">Pan</label>
+                            <input type="range" class="form-range" id="panValue" min="0" max="255" value="128">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Tilt</label>
+                            <input type="range" class="form-range" id="tiltValue" min="0" max="255" value="128">
+                        </div>
+                    </div>
+                `;
+                break;
+        }
+    }
+    
+    function saveEvent() {
+        // Implementation for saving events
+        const modal = bootstrap.Modal.getInstance(document.getElementById('eventModal'));
+        modal.hide();
+    }
+    
+    function saveSequence() {
+        if (!currentSong) {
+            alert('Please load a song first');
+            return;
+        }
+        
+        const sequenceName = prompt('Enter sequence name:');
+        if (!sequenceName) return;
+        
+        const sequenceData = {
+            song_id: currentSong.id,
+            name: sequenceName,
+            events: currentSequence.events
+        };
+        
+        fetch('/api/save-sequence', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(sequenceData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert('Error: ' + data.error);
+            } else {
+                alert('Sequence saved successfully!');
+            }
+        })
+        .catch(error => {
+            console.error('Error saving sequence:', error);
+            alert('Error saving sequence');
+        });
+    }
+    
+    function playSequence() {
+        if (!currentSong) {
+            alert('Please load a song first');
+            return;
+        }
+        
+        fetch('/api/play-sequence', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                song_id: currentSong.id,
+                events: currentSequence.events
+            })
+        });
+    }
+    
+    function pauseSequence() {
+        fetch('/api/pause-sequence', { method: 'POST' });
+    }
+    
+    function stopSequence() {
+        fetch('/api/stop-sequence', { method: 'POST' });
+    }
+    
+    function updateMasterDimmer() {
+        const value = document.getElementById('masterDimmer').value;
+        fetch('/api/master-dimmer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: parseInt(value) })
+        });
+    }
+    
+    function updateMasterColor() {
+        const color = document.getElementById('masterColor').value;
+        fetch('/api/master-color', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ color: color })
+        });
+    }
+    
+    function blackout() {
+        fetch('/api/blackout', { method: 'POST' });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,562 @@
+{% extends "base.html" %}
+
+{% block title %}Create Device - DMX Lighting Control{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-plus-circle"></i> Create/Edit Device</h5>
+            </div>
+            <div class="card-body">
+                <form id="deviceForm" action="/api/save-device" method="POST">
+                    <input type="hidden" id="deviceId" name="device_id">
+                    
+                    <div class="mb-3">
+                        <label for="deviceName" class="form-label">Device Name</label>
+                        <input type="text" class="form-control" id="deviceName" name="name" required 
+                               placeholder="e.g., RGB Par Can, Moving Head, etc.">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Channel Configuration</label>
+                        <div class="channel-config" id="channelConfig">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6>Channels</h6>
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="addChannel()">
+                                    <i class="bi bi-plus"></i> Add Channel
+                                </button>
+                            </div>
+                            
+                            <div id="channelList">
+                                <!-- Channels will be added here dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-lightbulb"></i> Channel Types</h6>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <ul class="list-unstyled">
+                                            <li><span class="badge" style="background-color: #ffc107">Dimmer</span> Master brightness control</li>
+                                            <li><span class="badge" style="background-color: #dc3545">Red</span> Red color channel</li>
+                                            <li><span class="badge" style="background-color: #28a745">Green</span> Green color channel</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <ul class="list-unstyled">
+                                            <li><span class="badge" style="background-color: #007bff">Blue</span> Blue color channel</li>
+                                            <li><span class="badge" style="background-color: #f8f9fa; color: #000">White</span> White color channel</li>
+                                            <li><span class="badge" style="background-color: #6c757d">Dummy</span> Unused/reserved channel</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <a href="{{ url_for('patch') }}" class="btn btn-secondary">
+                            <i class="bi bi-arrow-left"></i> Back to Patch
+                        </a>
+                        <div>
+                            {% if request.args.get('edit') %}
+                            <button type="button" class="btn btn-danger me-2" onclick="deleteDevice()">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                            {% endif %}
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-save"></i> Save Device
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-eye"></i> Device Preview</h5>
+            </div>
+            <div class="card-body">
+                <div class="text-center mb-3">
+                    <div class="device-preview" id="devicePreview">
+                        <div class="preview-fixture" id="previewFixture">
+                            <span id="previewName">Device</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="preview-info">
+                    <h6>Channel Summary</h6>
+                    <div id="channelSummary">
+                        <small class="text-muted">Add channels to see summary</small>
+                    </div>
+                </div>
+                
+                <div class="mt-3">
+                    <h6>Test Controls</h6>
+                    <div id="testControls">
+                        <!-- Test controls will be generated based on channels -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5><i class="bi bi-collection"></i> Device Templates</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-secondary btn-sm" onclick="loadTemplate('rgb_par')">
+                        RGB Par Can
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="loadTemplate('rgbw_par')">
+                        RGBW Par Can
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="loadTemplate('moving_head')">
+                        Moving Head
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="loadTemplate('dimmer')">
+                        Simple Dimmer
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="loadTemplate('strobe')">
+                        Strobe Light
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.device-preview {
+    width: 100%;
+    height: 150px;
+    background: #000;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.preview-fixture {
+    width: 60px;
+    height: 60px;
+    border-radius: 30px;
+    border: 3px solid #fff;
+    background: #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 10px;
+    font-weight: bold;
+    text-align: center;
+    transition: all 0.3s ease;
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+}
+
+.channel-item {
+    display: flex;
+    align-items: center;
+    margin: 10px 0;
+    padding: 10px;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+}
+
+.channel-item label {
+    flex: 1;
+    margin-right: 10px;
+    font-weight: 500;
+}
+
+.channel-item select {
+    flex: 2;
+    margin-right: 10px;
+}
+
+.channel-item .btn-sm {
+    flex-shrink: 0;
+}
+
+.test-control {
+    margin: 10px 0;
+}
+
+.test-control label {
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 5px;
+}
+
+.test-control input[type="range"] {
+    width: 100%;
+}
+
+.test-control input[type="color"] {
+    width: 100%;
+    height: 30px;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let channelCount = 0;
+    let deviceChannels = [];
+    let currentDeviceId = null;
+    
+    // Channel type templates
+    const deviceTemplates = {
+        'rgb_par': {
+            name: 'RGB Par Can',
+            channels: [
+                { type: 'dimmer_channel', name: 'Dimmer' },
+                { type: 'red_channel', name: 'Red' },
+                { type: 'green_channel', name: 'Green' },
+                { type: 'blue_channel', name: 'Blue' }
+            ]
+        },
+        'rgbw_par': {
+            name: 'RGBW Par Can',
+            channels: [
+                { type: 'dimmer_channel', name: 'Dimmer' },
+                { type: 'red_channel', name: 'Red' },
+                { type: 'green_channel', name: 'Green' },
+                { type: 'blue_channel', name: 'Blue' },
+                { type: 'white_channel', name: 'White' }
+            ]
+        },
+        'moving_head': {
+            name: 'Moving Head',
+            channels: [
+                { type: 'dimmer_channel', name: 'Dimmer' },
+                { type: 'red_channel', name: 'Red' },
+                { type: 'green_channel', name: 'Green' },
+                { type: 'blue_channel', name: 'Blue' },
+                { type: 'dummy', name: 'Pan' },
+                { type: 'dummy', name: 'Tilt' },
+                { type: 'dummy', name: 'Gobo' },
+                { type: 'dummy', name: 'Strobe' }
+            ]
+        },
+        'dimmer': {
+            name: 'Simple Dimmer',
+            channels: [
+                { type: 'dimmer_channel', name: 'Dimmer' }
+            ]
+        },
+        'strobe': {
+            name: 'Strobe Light',
+            channels: [
+                { type: 'dimmer_channel', name: 'Brightness' },
+                { type: 'dummy', name: 'Strobe Rate' }
+            ]
+        }
+    };
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        // Check if editing existing device
+        const urlParams = new URLSearchParams(window.location.search);
+        const editId = urlParams.get('edit');
+        
+        if (editId) {
+            loadDevice(editId);
+        } else {
+            // Start with one channel
+            addChannel();
+        }
+        
+        setupFormSubmission();
+    });
+    
+    function addChannel() {
+        channelCount++;
+        const channelDiv = document.createElement('div');
+        channelDiv.className = 'channel-item';
+        channelDiv.dataset.channelId = channelCount;
+        
+        channelDiv.innerHTML = `
+            <label>Channel ${channelCount}:</label>
+            <select class="form-select" name="channel_${channelCount}_type" onchange="updatePreview()">
+                <option value="dimmer_channel">Dimmer</option>
+                <option value="red_channel">Red</option>
+                <option value="green_channel">Green</option>
+                <option value="blue_channel">Blue</option>
+                <option value="white_channel">White</option>
+                <option value="dummy">Dummy/Other</option>
+            </select>
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeChannel(${channelCount})">
+                <i class="bi bi-trash"></i>
+            </button>
+        `;
+        
+        document.getElementById('channelList').appendChild(channelDiv);
+        updatePreview();
+    }
+    
+    function removeChannel(channelId) {
+        const channelDiv = document.querySelector(`[data-channel-id="${channelId}"]`);
+        if (channelDiv) {
+            channelDiv.remove();
+            updateChannelNumbers();
+            updatePreview();
+        }
+    }
+    
+    function updateChannelNumbers() {
+        const channels = document.querySelectorAll('.channel-item');
+        channels.forEach((channel, index) => {
+            const label = channel.querySelector('label');
+            label.textContent = `Channel ${index + 1}:`;
+            
+            const select = channel.querySelector('select');
+            select.name = `channel_${index + 1}_type`;
+        });
+        
+        channelCount = channels.length;
+    }
+    
+    function updatePreview() {
+        const deviceName = document.getElementById('deviceName').value || 'Device';
+        const channels = Array.from(document.querySelectorAll('.channel-item select')).map(select => ({
+            type: select.value
+        }));
+        
+        // Update device name
+        document.getElementById('previewName').textContent = deviceName;
+        
+        // Update channel summary
+        const summary = channels.map((ch, i) => 
+            `<div class="d-flex justify-content-between">
+                <span>Ch ${i + 1}:</span>
+                <span class="badge" style="background-color: ${DMXUtils.getChannelTypeColor(ch.type)}">${ch.type.replace('_', ' ')}</span>
+            </div>`
+        ).join('');
+        
+        document.getElementById('channelSummary').innerHTML = summary || '<small class="text-muted">No channels configured</small>';
+        
+        // Update test controls
+        updateTestControls(channels);
+        
+        // Update preview fixture color based on channels
+        updatePreviewFixture(channels);
+    }
+    
+    function updateTestControls(channels) {
+        const testControls = document.getElementById('testControls');
+        testControls.innerHTML = '';
+        
+        const hasColor = channels.some(ch => ['red_channel', 'green_channel', 'blue_channel'].includes(ch.type));
+        const hasDimmer = channels.some(ch => ch.type === 'dimmer_channel');
+        const hasWhite = channels.some(ch => ch.type === 'white_channel');
+        
+        if (hasDimmer) {
+            const dimmerControl = document.createElement('div');
+            dimmerControl.className = 'test-control';
+            dimmerControl.innerHTML = `
+                <label>Dimmer</label>
+                <input type="range" class="form-range" min="0" max="100" value="100" 
+                       onchange="testFixture('dimmer', this.value)">
+            `;
+            testControls.appendChild(dimmerControl);
+        }
+        
+        if (hasColor) {
+            const colorControl = document.createElement('div');
+            colorControl.className = 'test-control';
+            colorControl.innerHTML = `
+                <label>Color</label>
+                <input type="color" class="form-control form-control-color" value="#ffffff" 
+                       onchange="testFixture('color', this.value)">
+            `;
+            testControls.appendChild(colorControl);
+        }
+        
+        if (hasWhite) {
+            const whiteControl = document.createElement('div');
+            whiteControl.className = 'test-control';
+            whiteControl.innerHTML = `
+                <label>White</label>
+                <input type="range" class="form-range" min="0" max="255" value="0" 
+                       onchange="testFixture('white', this.value)">
+            `;
+            testControls.appendChild(whiteControl);
+        }
+        
+        if (!hasDimmer && !hasColor && !hasWhite) {
+            testControls.innerHTML = '<small class="text-muted">No testable channels</small>';
+        }
+    }
+    
+    function updatePreviewFixture(channels) {
+        const fixture = document.getElementById('previewFixture');
+        
+        // Reset to default
+        fixture.style.background = '#333';
+        fixture.style.opacity = '1';
+        fixture.style.boxShadow = '0 0 20px rgba(255, 255, 255, 0.3)';
+    }
+    
+    function testFixture(type, value) {
+        const fixture = document.getElementById('previewFixture');
+        
+        switch(type) {
+            case 'dimmer':
+                fixture.style.opacity = value / 100;
+                break;
+            case 'color':
+                const rgb = DMXUtils.hexToRgb(value);
+                fixture.style.background = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+                fixture.style.boxShadow = `0 0 30px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.8)`;
+                break;
+            case 'white':
+                const whiteLevel = parseInt(value);
+                fixture.style.background = `rgb(${whiteLevel}, ${whiteLevel}, ${whiteLevel})`;
+                break;
+        }
+    }
+    
+    function loadTemplate(templateKey) {
+        const template = deviceTemplates[templateKey];
+        if (!template) return;
+        
+        // Set device name
+        document.getElementById('deviceName').value = template.name;
+        
+        // Clear existing channels
+        document.getElementById('channelList').innerHTML = '';
+        channelCount = 0;
+        
+        // Add template channels
+        template.channels.forEach(channel => {
+            addChannel();
+            const lastSelect = document.querySelector('.channel-item:last-child select');
+            lastSelect.value = channel.type;
+        });
+        
+        updatePreview();
+    }
+    
+    function setupFormSubmission() {
+        document.getElementById('deviceForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData();
+            const deviceName = document.getElementById('deviceName').value;
+            
+            if (!deviceName) {
+                DMXUtils.showNotification('Please enter a device name', 'error');
+                return;
+            }
+            
+            const channels = [];
+            document.querySelectorAll('.channel-item').forEach((item, index) => {
+                const select = item.querySelector('select');
+                channels.push({
+                    type: select.value,
+                    name: `Channel ${index + 1}`
+                });
+            });
+            
+            if (channels.length === 0) {
+                DMXUtils.showNotification('Please add at least one channel', 'error');
+                return;
+            }
+            
+            const deviceData = {
+                name: deviceName,
+                channels: channels
+            };
+            
+            if (currentDeviceId) {
+                deviceData.id = currentDeviceId;
+            }
+            
+            DMXUtils.apiCall('/api/save-device', 'POST', deviceData)
+            .then(response => {
+                if (response.success) {
+                    DMXUtils.showNotification('Device saved successfully', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/patch';
+                    }, 1000);
+                } else {
+                    DMXUtils.showNotification('Error saving device: ' + response.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error saving device:', error);
+                DMXUtils.showNotification('Error saving device', 'error');
+            });
+        });
+    }
+    
+    function loadDevice(deviceId) {
+        currentDeviceId = deviceId;
+        
+        DMXUtils.apiCall(`/api/get-device/${deviceId}`)
+        .then(response => {
+            if (response.success) {
+                const device = response.device;
+                
+                // Set device name
+                document.getElementById('deviceName').value = device.name;
+                
+                // Clear existing channels
+                document.getElementById('channelList').innerHTML = '';
+                channelCount = 0;
+                
+                // Load device channels
+                const channels = JSON.parse(device.channels || '[]');
+                channels.forEach(channel => {
+                    addChannel();
+                    const lastSelect = document.querySelector('.channel-item:last-child select');
+                    lastSelect.value = channel.type;
+                });
+                
+                updatePreview();
+            } else {
+                DMXUtils.showNotification('Error loading device: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading device:', error);
+            DMXUtils.showNotification('Error loading device', 'error');
+        });
+    }
+    
+    function deleteDevice() {
+        if (!currentDeviceId) return;
+        
+        if (confirm('Are you sure you want to delete this device? This will also remove all patch assignments.')) {
+            DMXUtils.apiCall('/api/delete-device', 'POST', { device_id: currentDeviceId })
+            .then(response => {
+                if (response.success) {
+                    DMXUtils.showNotification('Device deleted successfully', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/patch';
+                    }, 1000);
+                } else {
+                    DMXUtils.showNotification('Error deleting device: ' + response.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error deleting device:', error);
+                DMXUtils.showNotification('Error deleting device', 'error');
+            });
+        }
+    }
+</script>
+{% endblock %}

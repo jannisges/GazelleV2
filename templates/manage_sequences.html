@@ -1,0 +1,713 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Sequences - DMX Lighting Control{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-music-note-list"></i> Saved Sequences</h5>
+                <div>
+                    <button class="btn btn-sm btn-outline-primary" onclick="importSequence()">
+                        <i class="bi bi-upload"></i> Import
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="exportSequences()">
+                        <i class="bi bi-download"></i> Export All
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="sequence-list custom-scrollbar">
+                    {% for sequence in sequences %}
+                    <div class="sequence-item fade-in">
+                        <div class="sequence-info">
+                            <h6>{{ sequence.name }}</h6>
+                            <div>
+                                <small class="text-muted">
+                                    <i class="bi bi-music-note"></i> {{ sequence.song.name }}
+                                    <span class="mx-2">|</span>
+                                    <i class="bi bi-clock"></i> {{ "%.1f"|format(sequence.song.duration) }}s
+                                    <span class="mx-2">|</span>
+                                    <i class="bi bi-lightning"></i> {{ sequence.get_events()|length }} events
+                                    <span class="mx-2">|</span>
+                                    <i class="bi bi-calendar"></i> {{ sequence.created_at.strftime('%Y-%m-%d') }}
+                                </small>
+                            </div>
+                        </div>
+                        <div class="sequence-actions">
+                            <button class="btn btn-sm btn-outline-primary" onclick="editSequence({{ sequence.id }})">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                            <button class="btn btn-sm btn-outline-success" onclick="duplicateSequence({{ sequence.id }})">
+                                <i class="bi bi-files"></i> Duplicate
+                            </button>
+                            <button class="btn btn-sm btn-outline-info" onclick="previewSequence({{ sequence.id }})">
+                                <i class="bi bi-play"></i> Preview
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteSequence({{ sequence.id }})">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    
+                    {% if not sequences %}
+                    <div class="text-center text-muted p-4">
+                        <i class="bi bi-music-note-list fs-2"></i>
+                        <p>No sequences created yet.<br>
+                        <a href="{{ url_for('index') }}" class="btn btn-primary btn-sm">Create Sequence</a></p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-collection-play"></i> Playlists</h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="createPlaylist()">
+                    <i class="bi bi-plus"></i> New
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="playlist-list custom-scrollbar" style="max-height: 400px; overflow-y: auto;">
+                    {% for playlist in playlists %}
+                    <div class="playlist-container">
+                        <div class="playlist-header">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">{{ playlist.name }}</h6>
+                                <div>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="playlist_{{ playlist.id }}" 
+                                               {% if playlist.is_active %}checked{% endif %} 
+                                               onchange="togglePlaylist({{ playlist.id }})">
+                                        <label class="form-check-label" for="playlist_{{ playlist.id }}">
+                                            Active
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="text-muted">
+                                {{ playlist.get_sequences()|length }} sequences
+                                {% if playlist.random_mode %} | Random Mode{% endif %}
+                            </small>
+                        </div>
+                        
+                        <div class="playlist-sequences">
+                            {% set sequence_ids = playlist.get_sequences() %}
+                            {% for seq_id in sequence_ids %}
+                            {% set seq = sequences|selectattr("id", "equalto", seq_id)|first %}
+                            {% if seq %}
+                            <div class="playlist-sequence">
+                                <div>
+                                    <strong>{{ seq.name }}</strong>
+                                    <br>
+                                    <small class="text-muted">{{ seq.song.name }}</small>
+                                </div>
+                                <button class="btn btn-sm btn-outline-danger" onclick="removeFromPlaylist({{ playlist.id }}, {{ seq.id }})">
+                                    <i class="bi bi-x"></i>
+                                </button>
+                            </div>
+                            {% endif %}
+                            {% endfor %}
+                            
+                            {% if not sequence_ids %}
+                            <div class="text-center text-muted p-3">
+                                <small>No sequences in playlist</small>
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="playlist-controls mt-2">
+                            <div class="btn-group w-100" role="group">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="editPlaylist({{ playlist.id }})">
+                                    <i class="bi bi-pencil"></i> Edit
+                                </button>
+                                <button class="btn btn-sm btn-outline-info" onclick="addToPlaylist({{ playlist.id }})">
+                                    <i class="bi bi-plus"></i> Add
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deletePlaylist({{ playlist.id }})">
+                                    <i class="bi bi-trash"></i> Delete
+                                </button>
+                            </div>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="random_{{ playlist.id }}" 
+                                       {% if playlist.random_mode %}checked{% endif %} 
+                                       onchange="toggleRandomMode({{ playlist.id }})">
+                                <label class="form-check-label" for="random_{{ playlist.id }}">
+                                    Random Mode
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    
+                    {% if not playlists %}
+                    <div class="text-center text-muted p-4">
+                        <i class="bi bi-collection-play fs-2"></i>
+                        <p>No playlists created yet.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5><i class="bi bi-info-circle"></i> Playback Status</h5>
+            </div>
+            <div class="card-body">
+                <div id="playbackStatus">
+                    <div class="text-center text-muted">
+                        <i class="bi bi-pause-circle fs-2"></i>
+                        <p>No sequence playing</p>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-outline-danger" onclick="stopAll()">
+                            <i class="bi bi-stop-circle"></i> Stop All Playback
+                        </button>
+                        <button class="btn btn-outline-warning" onclick="blackoutAll()">
+                            <i class="bi bi-power"></i> Blackout All
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create/Edit Playlist Modal -->
+<div class="modal fade" id="playlistModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="playlistModalTitle">Create Playlist</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="playlistForm">
+                    <input type="hidden" id="playlistId">
+                    <div class="mb-3">
+                        <label for="playlistName" class="form-label">Playlist Name</label>
+                        <input type="text" class="form-control" id="playlistName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Select Sequences</label>
+                        <div id="sequenceSelector" style="max-height: 200px; overflow-y: auto;">
+                            {% for sequence in sequences %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="{{ sequence.id }}" id="seq_{{ sequence.id }}">
+                                <label class="form-check-label" for="seq_{{ sequence.id }}">
+                                    {{ sequence.name }} ({{ sequence.song.name }})
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="playlistActive" checked>
+                            <label class="form-check-label" for="playlistActive">
+                                Active (available for button playback)
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="playlistRandom">
+                            <label class="form-check-label" for="playlistRandom">
+                                Random Mode
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="savePlaylist()">Save Playlist</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add to Playlist Modal -->
+<div class="modal fade" id="addToPlaylistModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Sequences to Playlist</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="targetPlaylistId">
+                <div id="availableSequences" style="max-height: 300px; overflow-y: auto;">
+                    {% for sequence in sequences %}
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" value="{{ sequence.id }}" id="add_seq_{{ sequence.id }}">
+                        <label class="form-check-label" for="add_seq_{{ sequence.id }}">
+                            {{ sequence.name }} ({{ sequence.song.name }})
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addSequencesToPlaylist()">Add Selected</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Import Sequence Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Import Sequence</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="importFile" class="form-label">Select Sequence File (JSON)</label>
+                    <input type="file" class="form-control" id="importFile" accept=".json">
+                </div>
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    Import sequences exported from this or other DMX control systems.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="performImport()">Import</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let sequences = {{ sequences | tojson }};
+    let playlists = {{ playlists | tojson }};
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        updatePlaybackStatus();
+        setInterval(updatePlaybackStatus, 2000); // Update every 2 seconds
+    });
+    
+    function editSequence(sequenceId) {
+        window.location.href = `/?edit=${sequenceId}`;
+    }
+    
+    function duplicateSequence(sequenceId) {
+        const name = prompt('Enter name for duplicated sequence:');
+        if (!name) return;
+        
+        DMXUtils.apiCall('/api/duplicate-sequence', 'POST', {
+            sequence_id: sequenceId,
+            new_name: name
+        })
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification('Sequence duplicated successfully', 'success');
+                location.reload();
+            } else {
+                DMXUtils.showNotification('Error duplicating sequence: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error duplicating sequence:', error);
+            DMXUtils.showNotification('Error duplicating sequence', 'error');
+        });
+    }
+    
+    function previewSequence(sequenceId) {
+        DMXUtils.apiCall('/api/play-sequence-by-id', 'POST', {
+            sequence_id: sequenceId
+        })
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification('Playing sequence preview', 'info');
+                updatePlaybackStatus();
+            } else {
+                DMXUtils.showNotification('Error playing sequence: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error playing sequence:', error);
+            DMXUtils.showNotification('Error playing sequence', 'error');
+        });
+    }
+    
+    function deleteSequence(sequenceId) {
+        const sequence = sequences.find(s => s.id === sequenceId);
+        if (!sequence) return;
+        
+        if (confirm(`Are you sure you want to delete the sequence "${sequence.name}"? This action cannot be undone.`)) {
+            DMXUtils.apiCall('/api/delete-sequence', 'POST', {
+                sequence_id: sequenceId
+            })
+            .then(response => {
+                if (response.success) {
+                    DMXUtils.showNotification('Sequence deleted successfully', 'success');
+                    location.reload();
+                } else {
+                    DMXUtils.showNotification('Error deleting sequence: ' + response.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error deleting sequence:', error);
+                DMXUtils.showNotification('Error deleting sequence', 'error');
+            });
+        }
+    }
+    
+    function createPlaylist() {
+        document.getElementById('playlistModalTitle').textContent = 'Create Playlist';
+        document.getElementById('playlistId').value = '';
+        document.getElementById('playlistName').value = '';
+        document.getElementById('playlistActive').checked = true;
+        document.getElementById('playlistRandom').checked = false;
+        
+        // Clear all checkboxes
+        document.querySelectorAll('#sequenceSelector .form-check-input').forEach(cb => {
+            cb.checked = false;
+        });
+        
+        const modal = new bootstrap.Modal(document.getElementById('playlistModal'));
+        modal.show();
+    }
+    
+    function editPlaylist(playlistId) {
+        const playlist = playlists.find(p => p.id === playlistId);
+        if (!playlist) return;
+        
+        document.getElementById('playlistModalTitle').textContent = 'Edit Playlist';
+        document.getElementById('playlistId').value = playlistId;
+        document.getElementById('playlistName').value = playlist.name;
+        document.getElementById('playlistActive').checked = playlist.is_active;
+        document.getElementById('playlistRandom').checked = playlist.random_mode;
+        
+        // Set selected sequences
+        const selectedSequences = JSON.parse(playlist.sequences || '[]');
+        document.querySelectorAll('#sequenceSelector .form-check-input').forEach(cb => {
+            cb.checked = selectedSequences.includes(parseInt(cb.value));
+        });
+        
+        const modal = new bootstrap.Modal(document.getElementById('playlistModal'));
+        modal.show();
+    }
+    
+    function savePlaylist() {
+        const playlistId = document.getElementById('playlistId').value;
+        const name = document.getElementById('playlistName').value;
+        const isActive = document.getElementById('playlistActive').checked;
+        const randomMode = document.getElementById('playlistRandom').checked;
+        
+        if (!name) {
+            DMXUtils.showNotification('Please enter a playlist name', 'error');
+            return;
+        }
+        
+        const selectedSequences = Array.from(document.querySelectorAll('#sequenceSelector .form-check-input:checked'))
+            .map(cb => parseInt(cb.value));
+        
+        const playlistData = {
+            name: name,
+            sequences: selectedSequences,
+            is_active: isActive,
+            random_mode: randomMode
+        };
+        
+        if (playlistId) {
+            playlistData.id = parseInt(playlistId);
+        }
+        
+        DMXUtils.apiCall('/api/save-playlist', 'POST', playlistData)
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification('Playlist saved successfully', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('playlistModal')).hide();
+                location.reload();
+            } else {
+                DMXUtils.showNotification('Error saving playlist: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error saving playlist:', error);
+            DMXUtils.showNotification('Error saving playlist', 'error');
+        });
+    }
+    
+    function deletePlaylist(playlistId) {
+        const playlist = playlists.find(p => p.id === playlistId);
+        if (!playlist) return;
+        
+        if (confirm(`Are you sure you want to delete the playlist "${playlist.name}"?`)) {
+            DMXUtils.apiCall('/api/delete-playlist', 'POST', {
+                playlist_id: playlistId
+            })
+            .then(response => {
+                if (response.success) {
+                    DMXUtils.showNotification('Playlist deleted successfully', 'success');
+                    location.reload();
+                } else {
+                    DMXUtils.showNotification('Error deleting playlist: ' + response.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error deleting playlist:', error);
+                DMXUtils.showNotification('Error deleting playlist', 'error');
+            });
+        }
+    }
+    
+    function togglePlaylist(playlistId) {
+        const checkbox = document.getElementById(`playlist_${playlistId}`);
+        
+        DMXUtils.apiCall('/api/toggle-playlist', 'POST', {
+            playlist_id: playlistId,
+            is_active: checkbox.checked
+        })
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification(
+                    `Playlist ${checkbox.checked ? 'activated' : 'deactivated'}`, 
+                    'success'
+                );
+            } else {
+                checkbox.checked = !checkbox.checked; // Revert on error
+                DMXUtils.showNotification('Error updating playlist: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            checkbox.checked = !checkbox.checked; // Revert on error
+            console.error('Error updating playlist:', error);
+            DMXUtils.showNotification('Error updating playlist', 'error');
+        });
+    }
+    
+    function toggleRandomMode(playlistId) {
+        const checkbox = document.getElementById(`random_${playlistId}`);
+        
+        DMXUtils.apiCall('/api/toggle-random-mode', 'POST', {
+            playlist_id: playlistId,
+            random_mode: checkbox.checked
+        })
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification(
+                    `Random mode ${checkbox.checked ? 'enabled' : 'disabled'}`, 
+                    'success'
+                );
+            } else {
+                checkbox.checked = !checkbox.checked; // Revert on error
+                DMXUtils.showNotification('Error updating random mode: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            checkbox.checked = !checkbox.checked; // Revert on error
+            console.error('Error updating random mode:', error);
+            DMXUtils.showNotification('Error updating random mode', 'error');
+        });
+    }
+    
+    function addToPlaylist(playlistId) {
+        document.getElementById('targetPlaylistId').value = playlistId;
+        
+        // Clear all checkboxes
+        document.querySelectorAll('#availableSequences .form-check-input').forEach(cb => {
+            cb.checked = false;
+        });
+        
+        const modal = new bootstrap.Modal(document.getElementById('addToPlaylistModal'));
+        modal.show();
+    }
+    
+    function addSequencesToPlaylist() {
+        const playlistId = parseInt(document.getElementById('targetPlaylistId').value);
+        const selectedSequences = Array.from(document.querySelectorAll('#availableSequences .form-check-input:checked'))
+            .map(cb => parseInt(cb.value));
+        
+        if (selectedSequences.length === 0) {
+            DMXUtils.showNotification('Please select at least one sequence', 'error');
+            return;
+        }
+        
+        DMXUtils.apiCall('/api/add-to-playlist', 'POST', {
+            playlist_id: playlistId,
+            sequence_ids: selectedSequences
+        })
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification('Sequences added to playlist', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('addToPlaylistModal')).hide();
+                location.reload();
+            } else {
+                DMXUtils.showNotification('Error adding to playlist: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error adding to playlist:', error);
+            DMXUtils.showNotification('Error adding to playlist', 'error');
+        });
+    }
+    
+    function removeFromPlaylist(playlistId, sequenceId) {
+        DMXUtils.apiCall('/api/remove-from-playlist', 'POST', {
+            playlist_id: playlistId,
+            sequence_id: sequenceId
+        })
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification('Sequence removed from playlist', 'success');
+                location.reload();
+            } else {
+                DMXUtils.showNotification('Error removing from playlist: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error removing from playlist:', error);
+            DMXUtils.showNotification('Error removing from playlist', 'error');
+        });
+    }
+    
+    function updatePlaybackStatus() {
+        DMXUtils.apiCall('/api/playback-status')
+        .then(response => {
+            const status = document.getElementById('playbackStatus');
+            
+            if (response.is_playing && response.current_sequence) {
+                status.innerHTML = `
+                    <div class="text-center">
+                        <i class="bi bi-play-circle-fill text-success fs-2"></i>
+                        <h6 class="mt-2">${response.current_sequence.name}</h6>
+                        <small class="text-muted">${response.current_sequence.song_name}</small>
+                        <div class="progress mt-2">
+                            <div class="progress-bar" style="width: ${response.progress}%"></div>
+                        </div>
+                        <small>${DMXUtils.formatTime(response.current_time)} / ${DMXUtils.formatTime(response.total_time)}</small>
+                    </div>
+                    <div class="d-grid gap-2 mt-3">
+                        <button class="btn btn-outline-danger" onclick="stopAll()">
+                            <i class="bi bi-stop-circle"></i> Stop Playback
+                        </button>
+                        <button class="btn btn-outline-warning" onclick="blackoutAll()">
+                            <i class="bi bi-power"></i> Blackout All
+                        </button>
+                    </div>
+                `;
+            } else {
+                status.innerHTML = `
+                    <div class="text-center text-muted">
+                        <i class="bi bi-pause-circle fs-2"></i>
+                        <p>No sequence playing</p>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-outline-danger" onclick="stopAll()">
+                            <i class="bi bi-stop-circle"></i> Stop All Playback
+                        </button>
+                        <button class="btn btn-outline-warning" onclick="blackoutAll()">
+                            <i class="bi bi-power"></i> Blackout All
+                        </button>
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Error getting playback status:', error);
+        });
+    }
+    
+    function stopAll() {
+        DMXUtils.apiCall('/api/stop-sequence', 'POST')
+        .then(response => {
+            DMXUtils.showNotification('All playback stopped', 'info');
+            updatePlaybackStatus();
+        })
+        .catch(error => {
+            console.error('Error stopping playback:', error);
+            DMXUtils.showNotification('Error stopping playback', 'error');
+        });
+    }
+    
+    function blackoutAll() {
+        DMXUtils.apiCall('/api/blackout', 'POST')
+        .then(response => {
+            DMXUtils.showNotification('All lights blacked out', 'info');
+        })
+        .catch(error => {
+            console.error('Error blacking out:', error);
+            DMXUtils.showNotification('Error blacking out', 'error');
+        });
+    }
+    
+    function importSequence() {
+        const modal = new bootstrap.Modal(document.getElementById('importModal'));
+        modal.show();
+    }
+    
+    function performImport() {
+        const fileInput = document.getElementById('importFile');
+        const file = fileInput.files[0];
+        
+        if (!file) {
+            DMXUtils.showNotification('Please select a file to import', 'error');
+            return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                
+                DMXUtils.apiCall('/api/import-sequence', 'POST', data)
+                .then(response => {
+                    if (response.success) {
+                        DMXUtils.showNotification('Sequence imported successfully', 'success');
+                        bootstrap.Modal.getInstance(document.getElementById('importModal')).hide();
+                        location.reload();
+                    } else {
+                        DMXUtils.showNotification('Error importing sequence: ' + response.error, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error importing sequence:', error);
+                    DMXUtils.showNotification('Error importing sequence', 'error');
+                });
+            } catch (error) {
+                DMXUtils.showNotification('Invalid JSON file', 'error');
+            }
+        };
+        
+        reader.readAsText(file);
+    }
+    
+    function exportSequences() {
+        DMXUtils.apiCall('/api/export-sequences')
+        .then(response => {
+            if (response.success) {
+                const blob = new Blob([JSON.stringify(response.data, null, 2)], 
+                    { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'dmx_sequences.json';
+                a.click();
+                URL.revokeObjectURL(url);
+                DMXUtils.showNotification('Sequences exported successfully', 'success');
+            } else {
+                DMXUtils.showNotification('Error exporting sequences: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error exporting sequences:', error);
+            DMXUtils.showNotification('Error exporting sequences', 'error');
+        });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,784 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - DMX Lighting Control{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6">
+        <div class="settings-section">
+            <h5><i class="bi bi-hdd"></i> Storage Management</h5>
+            
+            <div class="storage-info">
+                <div class="storage-icon">
+                    <i class="bi bi-device-hdd"></i>
+                </div>
+                <div class="storage-details">
+                    <h6>Internal Storage</h6>
+                    <div class="progress-bar-container">
+                        <div class="progress">
+                            <div class="progress-bar" id="internalStorageBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <small id="internalStorageText">Loading...</small>
+                </div>
+            </div>
+            
+            <div class="mt-3">
+                <h6>External Storage Devices</h6>
+                <div id="externalStorageList">
+                    <!-- External storage devices will be loaded here -->
+                </div>
+                
+                <div class="mt-3">
+                    <button class="btn btn-outline-primary" onclick="scanExternalStorage()">
+                        <i class="bi bi-arrow-clockwise"></i> Scan for Devices
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="addExternalStorage()">
+                        <i class="bi bi-plus"></i> Add Storage
+                    </button>
+                </div>
+            </div>
+            
+            <div class="mt-4">
+                <h6>Storage Settings</h6>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="autoCopyExternal" checked>
+                    <label class="form-check-label" for="autoCopyExternal">
+                        Automatically copy uploaded files to internal storage
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="cleanupOldFiles">
+                    <label class="form-check-label" for="cleanupOldFiles">
+                        Automatically delete old files when storage is low
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <h5><i class="bi bi-shield"></i> Security Settings</h5>
+            
+            <div class="mb-3">
+                <label for="webPassword" class="form-label">Web Interface Password</label>
+                <div class="input-group">
+                    <input type="password" class="form-control" id="webPassword" placeholder="Enter new password">
+                    <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility()">
+                        <i class="bi bi-eye" id="passwordToggleIcon"></i>
+                    </button>
+                </div>
+                <small class="form-text text-muted">
+                    Leave empty to disable password protection
+                </small>
+            </div>
+            
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="enableHttps">
+                    <label class="form-check-label" for="enableHttps">
+                        Enable HTTPS (requires SSL certificate)
+                    </label>
+                </div>
+            </div>
+            
+            <button class="btn btn-primary" onclick="saveSecuritySettings()">
+                <i class="bi bi-save"></i> Save Security Settings
+            </button>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="settings-section">
+            <h5><i class="bi bi-wifi"></i> Network Settings</h5>
+            
+            <div class="mb-3">
+                <div class="btn-group w-100" role="group">
+                    <input type="radio" class="btn-check" name="networkMode" id="wifiMode" value="wifi" checked>
+                    <label class="btn btn-outline-primary" for="wifiMode">WiFi Client</label>
+                    
+                    <input type="radio" class="btn-check" name="networkMode" id="hotspotMode" value="hotspot">
+                    <label class="btn btn-outline-primary" for="hotspotMode">Hotspot</label>
+                </div>
+            </div>
+            
+            <!-- WiFi Client Settings -->
+            <div id="wifiSettings">
+                <h6>WiFi Networks</h6>
+                <div class="d-flex justify-content-between mb-2">
+                    <span>Available Networks:</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="scanWiFi()">
+                        <i class="bi bi-arrow-clockwise"></i> Rescan
+                    </button>
+                </div>
+                
+                <div id="wifiNetworks" style="max-height: 200px; overflow-y: auto;">
+                    <!-- WiFi networks will be loaded here -->
+                </div>
+                
+                <div class="mt-3">
+                    <button class="btn btn-outline-primary" onclick="addCustomWiFi()">
+                        <i class="bi bi-plus"></i> Add Custom Network
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Hotspot Settings -->
+            <div id="hotspotSettings" style="display: none;">
+                <h6>Hotspot Configuration</h6>
+                <div class="mb-3">
+                    <label for="hotspotSSID" class="form-label">Network Name (SSID)</label>
+                    <input type="text" class="form-control" id="hotspotSSID" value="DMX-Control-AP">
+                </div>
+                <div class="mb-3">
+                    <label for="hotspotPassword" class="form-label">Password</label>
+                    <input type="password" class="form-control" id="hotspotPassword" placeholder="Enter hotspot password">
+                    <small class="form-text text-muted">
+                        Leave empty for open network (not recommended)
+                    </small>
+                </div>
+                <div class="mb-3">
+                    <label for="hotspotChannel" class="form-label">WiFi Channel</label>
+                    <select class="form-select" id="hotspotChannel">
+                        <option value="1">1 (2.412 GHz)</option>
+                        <option value="6" selected>6 (2.437 GHz)</option>
+                        <option value="11">11 (2.462 GHz)</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>Current Status:</span>
+                    <span id="networkStatus" class="badge bg-secondary">Checking...</span>
+                </div>
+                <div class="mt-2">
+                    <small id="networkDetails" class="text-muted">Loading network information...</small>
+                </div>
+            </div>
+            
+            <div class="mt-3">
+                <button class="btn btn-primary" onclick="saveNetworkSettings()">
+                    <i class="bi bi-save"></i> Apply Network Settings
+                </button>
+                <button class="btn btn-outline-warning" onclick="restartNetwork()">
+                    <i class="bi bi-arrow-clockwise"></i> Restart Network
+                </button>
+            </div>
+        </div>
+        
+        <div class="settings-section">
+            <h5><i class="bi bi-gear"></i> System Settings</h5>
+            
+            <div class="mb-3">
+                <label for="systemName" class="form-label">System Name</label>
+                <input type="text" class="form-control" id="systemName" value="DMX Control System">
+            </div>
+            
+            <div class="mb-3">
+                <label for="timezone" class="form-label">Timezone</label>
+                <select class="form-select" id="timezone">
+                    <option value="UTC">UTC</option>
+                    <option value="US/Eastern">US/Eastern</option>
+                    <option value="US/Central">US/Central</option>
+                    <option value="US/Mountain">US/Mountain</option>
+                    <option value="US/Pacific">US/Pacific</option>
+                    <option value="Europe/London">Europe/London</option>
+                    <option value="Europe/Berlin">Europe/Berlin</option>
+                    <option value="Asia/Tokyo">Asia/Tokyo</option>
+                </select>
+            </div>
+            
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="autoStart" checked>
+                    <label class="form-check-label" for="autoStart">
+                        Start DMX control on system boot
+                    </label>
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="enableLogging" checked>
+                    <label class="form-check-label" for="enableLogging">
+                        Enable system logging
+                    </label>
+                </div>
+            </div>
+            
+            <button class="btn btn-primary" onclick="saveSystemSettings()">
+                <i class="bi bi-save"></i> Save System Settings
+            </button>
+            
+            <div class="mt-4">
+                <h6>System Actions</h6>
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-info" onclick="exportAllSettings()">
+                        <i class="bi bi-download"></i> Export All Settings
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="importSettings()">
+                        <i class="bi bi-upload"></i> Import Settings
+                    </button>
+                    <button class="btn btn-outline-warning" onclick="restartSystem()">
+                        <i class="bi bi-arrow-clockwise"></i> Restart System
+                    </button>
+                    <button class="btn btn-outline-danger" onclick="factoryReset()">
+                        <i class="bi bi-arrow-counterclockwise"></i> Factory Reset
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- WiFi Password Modal -->
+<div class="modal fade" id="wifiPasswordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Connect to WiFi</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Enter password for network: <strong id="selectedSSID"></strong></p>
+                <div class="mb-3">
+                    <label for="wifiPasswordInput" class="form-label">Password</label>
+                    <input type="password" class="form-control" id="wifiPasswordInput">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="connectToWiFi()">Connect</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Custom WiFi Modal -->
+<div class="modal fade" id="customWifiModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Custom WiFi Network</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="customSSID" class="form-label">Network Name (SSID)</label>
+                    <input type="text" class="form-control" id="customSSID">
+                </div>
+                <div class="mb-3">
+                    <label for="customPassword" class="form-label">Password</label>
+                    <input type="password" class="form-control" id="customPassword">
+                </div>
+                <div class="mb-3">
+                    <label for="customSecurity" class="form-label">Security</label>
+                    <select class="form-select" id="customSecurity">
+                        <option value="WPA2">WPA2</option>
+                        <option value="WPA">WPA</option>
+                        <option value="WEP">WEP</option>
+                        <option value="OPEN">Open (No Security)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addCustomNetwork()">Add Network</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Import Settings Modal -->
+<div class="modal fade" id="importSettingsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Import Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="settingsFile" class="form-label">Select Settings File (JSON)</label>
+                    <input type="file" class="form-control" id="settingsFile" accept=".json">
+                </div>
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    Importing settings will overwrite current configuration. Make sure to export current settings first.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="performSettingsImport()">Import</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let selectedWiFiSSID = '';
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        loadStorageInfo();
+        loadNetworkStatus();
+        loadSystemSettings();
+        setupNetworkModeToggle();
+        
+        // Refresh network status every 10 seconds
+        setInterval(loadNetworkStatus, 10000);
+    });
+    
+    function setupNetworkModeToggle() {
+        document.querySelectorAll('input[name="networkMode"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                if (this.value === 'wifi') {
+                    document.getElementById('wifiSettings').style.display = 'block';
+                    document.getElementById('hotspotSettings').style.display = 'none';
+                } else {
+                    document.getElementById('wifiSettings').style.display = 'none';
+                    document.getElementById('hotspotSettings').style.display = 'block';
+                }
+            });
+        });
+    }
+    
+    function loadStorageInfo() {
+        DMXUtils.apiCall('/api/storage-info')
+        .then(response => {
+            if (response.success) {
+                const data = response.data;
+                
+                // Update internal storage
+                const usedPercent = (data.internal.used / data.internal.total) * 100;
+                document.getElementById('internalStorageBar').style.width = usedPercent + '%';
+                document.getElementById('internalStorageText').textContent = 
+                    `${DMXUtils.formatFileSize(data.internal.used)} / ${DMXUtils.formatFileSize(data.internal.total)} (${usedPercent.toFixed(1)}% used)`;
+                
+                // Update external storage
+                const externalList = document.getElementById('externalStorageList');
+                externalList.innerHTML = '';
+                
+                if (data.external && data.external.length > 0) {
+                    data.external.forEach(storage => {
+                        const storageDiv = document.createElement('div');
+                        storageDiv.className = 'storage-info';
+                        storageDiv.innerHTML = `
+                            <div class="storage-icon">
+                                <i class="bi bi-usb-drive"></i>
+                            </div>
+                            <div class="storage-details">
+                                <h6>${storage.name}</h6>
+                                <div class="progress-bar-container">
+                                    <div class="progress">
+                                        <div class="progress-bar" style="width: ${(storage.used / storage.total) * 100}%"></div>
+                                    </div>
+                                </div>
+                                <small>${DMXUtils.formatFileSize(storage.used)} / ${DMXUtils.formatFileSize(storage.total)}</small>
+                            </div>
+                            <button class="btn btn-sm btn-outline-danger" onclick="removeExternalStorage('${storage.path}')">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        `;
+                        externalList.appendChild(storageDiv);
+                    });
+                } else {
+                    externalList.innerHTML = '<p class="text-muted">No external storage devices connected</p>';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading storage info:', error);
+        });
+    }
+    
+    function loadNetworkStatus() {
+        DMXUtils.apiCall('/api/network-status')
+        .then(response => {
+            if (response.success) {
+                const data = response.data;
+                const statusBadge = document.getElementById('networkStatus');
+                const detailsText = document.getElementById('networkDetails');
+                
+                if (data.connected) {
+                    statusBadge.className = 'badge bg-success';
+                    statusBadge.textContent = 'Connected';
+                    detailsText.textContent = `Connected to ${data.ssid} (${data.ip_address})`;
+                } else {
+                    statusBadge.className = 'badge bg-danger';
+                    statusBadge.textContent = 'Disconnected';
+                    detailsText.textContent = 'Not connected to any network';
+                }
+                
+                // Load WiFi networks if in WiFi mode
+                if (document.getElementById('wifiMode').checked) {
+                    loadWiFiNetworks();
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading network status:', error);
+            document.getElementById('networkStatus').textContent = 'Error';
+        });
+    }
+    
+    function loadWiFiNetworks() {
+        DMXUtils.apiCall('/api/wifi-networks')
+        .then(response => {
+            if (response.success) {
+                const networksDiv = document.getElementById('wifiNetworks');
+                networksDiv.innerHTML = '';
+                
+                response.networks.forEach(network => {
+                    const networkDiv = document.createElement('div');
+                    networkDiv.className = `wifi-network ${network.connected ? 'connected' : ''}`;
+                    networkDiv.onclick = () => selectWiFiNetwork(network.ssid, network.encrypted);
+                    
+                    const signalStrength = Math.floor(network.signal / 25); // Convert to 0-4 scale
+                    const signalIcon = ['bi-wifi-off', 'bi-wifi-1', 'bi-wifi-2', 'bi-wifi'][signalStrength] || 'bi-wifi';
+                    
+                    networkDiv.innerHTML = `
+                        <div class="wifi-icon">
+                            <i class="bi ${network.encrypted ? 'bi-lock' : 'bi-unlock'}"></i>
+                        </div>
+                        <div class="wifi-info">
+                            <h6>${network.ssid}</h6>
+                            <small>${network.encrypted ? 'Secured' : 'Open'} ${network.connected ? '(Connected)' : ''}</small>
+                        </div>
+                        <div class="wifi-signal">
+                            <i class="bi ${signalIcon}"></i>
+                        </div>
+                    `;
+                    
+                    networksDiv.appendChild(networkDiv);
+                });
+                
+                if (response.networks.length === 0) {
+                    networksDiv.innerHTML = '<p class="text-muted">No WiFi networks found</p>';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading WiFi networks:', error);
+        });
+    }
+    
+    function selectWiFiNetwork(ssid, encrypted) {
+        selectedWiFiSSID = ssid;
+        
+        if (encrypted) {
+            document.getElementById('selectedSSID').textContent = ssid;
+            const modal = new bootstrap.Modal(document.getElementById('wifiPasswordModal'));
+            modal.show();
+        } else {
+            connectToWiFi('');
+        }
+    }
+    
+    function connectToWiFi(password = null) {
+        if (password === null) {
+            password = document.getElementById('wifiPasswordInput').value;
+        }
+        
+        DMXUtils.apiCall('/api/connect-wifi', 'POST', {
+            ssid: selectedWiFiSSID,
+            password: password
+        })
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification('Connecting to WiFi...', 'info');
+                bootstrap.Modal.getInstance(document.getElementById('wifiPasswordModal'))?.hide();
+                
+                // Check connection status after a delay
+                setTimeout(loadNetworkStatus, 5000);
+            } else {
+                DMXUtils.showNotification('Failed to connect: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error connecting to WiFi:', error);
+            DMXUtils.showNotification('Error connecting to WiFi', 'error');
+        });
+    }
+    
+    function scanWiFi() {
+        DMXUtils.showNotification('Scanning for WiFi networks...', 'info');
+        loadWiFiNetworks();
+    }
+    
+    function addCustomWiFi() {
+        const modal = new bootstrap.Modal(document.getElementById('customWifiModal'));
+        modal.show();
+    }
+    
+    function addCustomNetwork() {
+        const ssid = document.getElementById('customSSID').value;
+        const password = document.getElementById('customPassword').value;
+        const security = document.getElementById('customSecurity').value;
+        
+        if (!ssid) {
+            DMXUtils.showNotification('Please enter a network name', 'error');
+            return;
+        }
+        
+        selectedWiFiSSID = ssid;
+        connectToWiFi(password);
+        
+        bootstrap.Modal.getInstance(document.getElementById('customWifiModal')).hide();
+    }
+    
+    function saveNetworkSettings() {
+        const mode = document.querySelector('input[name="networkMode"]:checked').value;
+        
+        if (mode === 'hotspot') {
+            const ssid = document.getElementById('hotspotSSID').value;
+            const password = document.getElementById('hotspotPassword').value;
+            const channel = document.getElementById('hotspotChannel').value;
+            
+            DMXUtils.apiCall('/api/configure-hotspot', 'POST', {
+                ssid: ssid,
+                password: password,
+                channel: parseInt(channel)
+            })
+            .then(response => {
+                if (response.success) {
+                    DMXUtils.showNotification('Hotspot configuration saved', 'success');
+                    setTimeout(loadNetworkStatus, 3000);
+                } else {
+                    DMXUtils.showNotification('Error configuring hotspot: ' + response.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error configuring hotspot:', error);
+                DMXUtils.showNotification('Error configuring hotspot', 'error');
+            });
+        }
+    }
+    
+    function restartNetwork() {
+        if (confirm('This will restart the network connection. Continue?')) {
+            DMXUtils.apiCall('/api/restart-network', 'POST')
+            .then(response => {
+                DMXUtils.showNotification('Network restarting...', 'info');
+                setTimeout(loadNetworkStatus, 10000);
+            })
+            .catch(error => {
+                console.error('Error restarting network:', error);
+                DMXUtils.showNotification('Error restarting network', 'error');
+            });
+        }
+    }
+    
+    function togglePasswordVisibility() {
+        const passwordInput = document.getElementById('webPassword');
+        const toggleIcon = document.getElementById('passwordToggleIcon');
+        
+        if (passwordInput.type === 'password') {
+            passwordInput.type = 'text';
+            toggleIcon.className = 'bi bi-eye-slash';
+        } else {
+            passwordInput.type = 'password';
+            toggleIcon.className = 'bi bi-eye';
+        }
+    }
+    
+    function saveSecuritySettings() {
+        const password = document.getElementById('webPassword').value;
+        const enableHttps = document.getElementById('enableHttps').checked;
+        
+        DMXUtils.apiCall('/api/save-security-settings', 'POST', {
+            web_password: password,
+            enable_https: enableHttps
+        })
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification('Security settings saved', 'success');
+            } else {
+                DMXUtils.showNotification('Error saving security settings: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error saving security settings:', error);
+            DMXUtils.showNotification('Error saving security settings', 'error');
+        });
+    }
+    
+    function loadSystemSettings() {
+        DMXUtils.apiCall('/api/system-settings')
+        .then(response => {
+            if (response.success) {
+                const settings = response.settings;
+                document.getElementById('systemName').value = settings.system_name || 'DMX Control System';
+                document.getElementById('timezone').value = settings.timezone || 'UTC';
+                document.getElementById('autoStart').checked = settings.auto_start !== false;
+                document.getElementById('enableLogging').checked = settings.enable_logging !== false;
+            }
+        })
+        .catch(error => {
+            console.error('Error loading system settings:', error);
+        });
+    }
+    
+    function saveSystemSettings() {
+        const settings = {
+            system_name: document.getElementById('systemName').value,
+            timezone: document.getElementById('timezone').value,
+            auto_start: document.getElementById('autoStart').checked,
+            enable_logging: document.getElementById('enableLogging').checked
+        };
+        
+        DMXUtils.apiCall('/api/save-system-settings', 'POST', settings)
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification('System settings saved', 'success');
+            } else {
+                DMXUtils.showNotification('Error saving system settings: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error saving system settings:', error);
+            DMXUtils.showNotification('Error saving system settings', 'error');
+        });
+    }
+    
+    function scanExternalStorage() {
+        DMXUtils.showNotification('Scanning for external storage...', 'info');
+        loadStorageInfo();
+    }
+    
+    function addExternalStorage() {
+        const path = prompt('Enter the path to the external storage device:');
+        if (!path) return;
+        
+        DMXUtils.apiCall('/api/add-external-storage', 'POST', { path: path })
+        .then(response => {
+            if (response.success) {
+                DMXUtils.showNotification('External storage added', 'success');
+                loadStorageInfo();
+            } else {
+                DMXUtils.showNotification('Error adding external storage: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error adding external storage:', error);
+            DMXUtils.showNotification('Error adding external storage', 'error');
+        });
+    }
+    
+    function removeExternalStorage(path) {
+        if (confirm('Remove this external storage device from the system?')) {
+            DMXUtils.apiCall('/api/remove-external-storage', 'POST', { path: path })
+            .then(response => {
+                if (response.success) {
+                    DMXUtils.showNotification('External storage removed', 'success');
+                    loadStorageInfo();
+                } else {
+                    DMXUtils.showNotification('Error removing external storage: ' + response.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error removing external storage:', error);
+                DMXUtils.showNotification('Error removing external storage', 'error');
+            });
+        }
+    }
+    
+    function exportAllSettings() {
+        DMXUtils.apiCall('/api/export-all-settings')
+        .then(response => {
+            if (response.success) {
+                const blob = new Blob([JSON.stringify(response.data, null, 2)], 
+                    { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'dmx_control_settings.json';
+                a.click();
+                URL.revokeObjectURL(url);
+                DMXUtils.showNotification('Settings exported successfully', 'success');
+            } else {
+                DMXUtils.showNotification('Error exporting settings: ' + response.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error exporting settings:', error);
+            DMXUtils.showNotification('Error exporting settings', 'error');
+        });
+    }
+    
+    function importSettings() {
+        const modal = new bootstrap.Modal(document.getElementById('importSettingsModal'));
+        modal.show();
+    }
+    
+    function performSettingsImport() {
+        const fileInput = document.getElementById('settingsFile');
+        const file = fileInput.files[0];
+        
+        if (!file) {
+            DMXUtils.showNotification('Please select a file to import', 'error');
+            return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                
+                DMXUtils.apiCall('/api/import-settings', 'POST', data)
+                .then(response => {
+                    if (response.success) {
+                        DMXUtils.showNotification('Settings imported successfully. System will restart.', 'success');
+                        bootstrap.Modal.getInstance(document.getElementById('importSettingsModal')).hide();
+                        setTimeout(() => location.reload(), 3000);
+                    } else {
+                        DMXUtils.showNotification('Error importing settings: ' + response.error, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error importing settings:', error);
+                    DMXUtils.showNotification('Error importing settings', 'error');
+                });
+            } catch (error) {
+                DMXUtils.showNotification('Invalid JSON file', 'error');
+            }
+        };
+        
+        reader.readAsText(file);
+    }
+    
+    function restartSystem() {
+        if (confirm('This will restart the entire system. All current sessions will be lost. Continue?')) {
+            DMXUtils.apiCall('/api/restart-system', 'POST')
+            .then(response => {
+                DMXUtils.showNotification('System restarting...', 'info');
+            })
+            .catch(error => {
+                console.error('Error restarting system:', error);
+                DMXUtils.showNotification('Error restarting system', 'error');
+            });
+        }
+    }
+    
+    function factoryReset() {
+        const confirmation = prompt('This will reset ALL settings and delete ALL data. Type "FACTORY RESET" to confirm:');
+        
+        if (confirmation === 'FACTORY RESET') {
+            DMXUtils.apiCall('/api/factory-reset', 'POST')
+            .then(response => {
+                if (response.success) {
+                    DMXUtils.showNotification('Factory reset initiated. System will restart.', 'warning');
+                    setTimeout(() => location.reload(), 5000);
+                } else {
+                    DMXUtils.showNotification('Error performing factory reset: ' + response.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error performing factory reset:', error);
+                DMXUtils.showNotification('Error performing factory reset', 'error');
+            });
+        }
+    }
+</script>
+{% endblock %}
