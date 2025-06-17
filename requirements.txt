@@ -3,6 +3,7 @@ Flask-SQLAlchemy==3.0.5
 Flask-Migrate==4.0.5
 pygame==2.5.2
 numpy==1.24.4
+scipy>=1.9.0,<1.11.0
 librosa==0.10.1
 psutil==5.9.5
 soundfile==0.12.1

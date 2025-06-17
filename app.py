@@ -12,6 +12,14 @@ from datetime import datetime
 import shutil
 import psutil
 
+# Fix for scipy compatibility
+try:
+    import scipy.signal
+    if not hasattr(scipy.signal, 'hann'):
+        scipy.signal.hann = scipy.signal.windows.hann
+except ImportError:
+    pass
+
 try:
     import RPi.GPIO as GPIO
     RPI_AVAILABLE = True
@@ -23,7 +31,7 @@ app.config['SECRET_KEY'] = 'dmx-lighting-control-secret-key'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///dmx_control.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 150 * 1024 * 1024  # 150MB max file size
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
@@ -188,6 +196,8 @@ class AudioPlayer:
         self.is_playing = False
         self.start_time = 0
         self.pause_time = 0
+        self.total_pause_duration = 0
+        self.seek_offset = 0
     
     def load_song(self, file_path):
         try:
@@ -198,33 +208,48 @@ class AudioPlayer:
             print(f"Error loading audio: {e}")
             return False
     
-    def play(self):
+    def play(self, start_position=0):
         if self.current_song:
-            pygame.mixer.music.play()
+            pygame.mixer.music.play(start=start_position)
             self.is_playing = True
             self.start_time = time.time()
+            self.total_pause_duration = 0
+            self.seek_offset = start_position
             return True
         return False
     
     def pause(self):
-        pygame.mixer.music.pause()
-        self.is_playing = False
-        self.pause_time = time.time()
+        if self.is_playing:
+            pygame.mixer.music.pause()
+            self.is_playing = False
+            self.pause_time = time.time()
     
     def resume(self):
-        pygame.mixer.music.unpause()
-        self.is_playing = True
+        if not self.is_playing and self.pause_time > 0:
+            pygame.mixer.music.unpause()
+            self.is_playing = True
+            # Add the pause duration to total
+            self.total_pause_duration += time.time() - self.pause_time
+            self.pause_time = 0
     
     def stop(self):
         pygame.mixer.music.stop()
         self.is_playing = False
         self.start_time = 0
         self.pause_time = 0
+        self.total_pause_duration = 0
+        self.seek_offset = 0
     
     def get_position(self):
         if self.is_playing and self.start_time:
-            return time.time() - self.start_time
-        return 0
+            # Calculate actual position accounting for pauses and seeking
+            elapsed = time.time() - self.start_time - self.total_pause_duration
+            return max(0, elapsed + self.seek_offset)
+        elif self.pause_time > 0:
+            # Return position at time of pause
+            elapsed = self.pause_time - self.start_time - self.total_pause_duration
+            return max(0, elapsed + self.seek_offset)
+        return self.seek_offset
 
 # Initialize controllers
 dmx_controller = DMXController()
@@ -256,11 +281,11 @@ def trigger_sequence_playback():
     if not sequence_ids:
         return
     
-    sequence = Sequence.query.get(sequence_ids[0])
+    sequence = db.session.get(Sequence, sequence_ids[0])
     if sequence and sequence.song:
         play_sequence(sequence)
 
-def play_sequence(sequence):
+def play_sequence(sequence, start_time=0):
     global current_sequence, is_playing
     
     if is_playing:
@@ -271,14 +296,14 @@ def play_sequence(sequence):
     
     # Load and play audio
     if audio_player.load_song(sequence.song.file_path):
-        audio_player.play()
+        audio_player.play(start_time)
         
         # Start sequence playback in separate thread
-        playback_thread = threading.Thread(target=sequence_playback_loop, args=(sequence,))
+        playback_thread = threading.Thread(target=sequence_playback_loop, args=(sequence, start_time))
         playback_thread.daemon = True
         playback_thread.start()
 
-def sequence_playback_loop(sequence):
+def sequence_playback_loop(sequence, start_time_offset=0):
     global is_playing
     
     events = sequence.get_events()
@@ -287,8 +312,12 @@ def sequence_playback_loop(sequence):
     start_time = time.time()
     event_index = 0
     
+    # Skip events that are before the start time offset
+    while event_index < len(events) and events[event_index].get('time', 0) < start_time_offset:
+        event_index += 1
+    
     while is_playing and event_index < len(events):
-        current_time = time.time() - start_time
+        current_time = time.time() - start_time + start_time_offset
         event = events[event_index]
         
         if current_time >= event.get('time', 0):
@@ -335,7 +364,25 @@ def index():
 @app.route('/patch')
 def patch():
     devices = Device.query.all()
-    patched_devices = PatchedDevice.query.all()
+    patched_devices_query = PatchedDevice.query.all()
+    
+    # Convert patched devices to dictionaries for JSON serialization
+    patched_devices = []
+    for pd in patched_devices_query:
+        device_channels = json.loads(pd.device.channels) if pd.device.channels else []
+        patched_devices.append({
+            'id': pd.id,
+            'device_id': pd.device_id,
+            'start_address': pd.start_address,
+            'x_position': pd.x_position,
+            'y_position': pd.y_position,
+            'device': {
+                'id': pd.device.id,
+                'name': pd.device.name,
+                'channels': device_channels
+            }
+        })
+    
     return render_template('patch.html', devices=devices, patched_devices=patched_devices)
 
 @app.route('/create-device')
@@ -378,13 +425,135 @@ def upload_song():
     
     # Process audio
     try:
-        y, sr = librosa.load(file_path)
+        # Enhanced audio loading with format validation
+        y, sr = librosa.load(file_path, sr=None)  # Keep original sample rate
         duration = librosa.get_duration(y=y, sr=sr)
         
-        # Generate waveform data for visualization
-        hop_length = len(y) // 1000  # 1000 points for waveform
-        waveform = librosa.amplitude_to_db(np.abs(librosa.stft(y, hop_length=hop_length)))
-        waveform_data = waveform.mean(axis=0).tolist()
+        # Use original full-resolution audio data for maximum quality
+        # Convert to absolute amplitude values
+        waveform_amplitude = [float(abs(val)) for val in y.tolist()]
+        
+        # For very long files, we'll use a high resolution but not full resolution to avoid browser memory issues
+        max_points = 500000  # 500k points should handle most songs while maintaining quality
+        if len(waveform_amplitude) > max_points:
+            # Use decimation with anti-aliasing for high-quality downsampling
+            try:
+                from scipy import signal
+                decimation_factor = len(waveform_amplitude) // max_points
+                if decimation_factor > 1:
+                    # Apply anti-aliasing filter before decimation
+                    waveform_amplitude = signal.decimate(np.array(waveform_amplitude), decimation_factor, ftype='fir').tolist()
+                    waveform_amplitude = [float(val) for val in waveform_amplitude]
+            except ImportError:
+                # Simple downsampling without anti-aliasing
+                step = len(waveform_amplitude) // max_points
+                waveform_amplitude = waveform_amplitude[::step]
+        
+        # Generate frequency-based coloring data using STFT with high resolution
+        def process_frequency_bands():
+            # Use smaller chunks for high-resolution frequency analysis
+            chunk_size = max(1024, sr // 20)  # At least 1024 samples, or 1/20th of a second
+            num_chunks = len(y) // chunk_size
+            
+            low_band = []
+            mid_band = []
+            high_band = []
+            
+            # Define frequency ranges in Hz
+            low_freq_max = 250.0    # Bass: 20-250 Hz
+            mid_freq_max = 4000.0   # Mids: 250-4000 Hz
+            # High: 4000+ Hz
+            
+            for i in range(num_chunks):
+                start_idx = i * chunk_size
+                end_idx = min((i + 1) * chunk_size, len(y))
+                chunk = y[start_idx:end_idx]
+                
+                
+                if len(chunk) >= 256:  # Need minimum samples for meaningful FFT
+                    # Compute FFT for this chunk with appropriate window
+                    window = np.hanning(len(chunk))
+                    windowed_chunk = chunk * window
+                    n_fft = max(1024, len(chunk))
+                    fft = np.fft.rfft(windowed_chunk, n=n_fft)
+                    magnitude = np.abs(fft)
+                    freqs = np.fft.rfftfreq(n_fft, 1/sr)
+                    
+                    # Split into frequency bands
+                    low_mask = freqs <= low_freq_max
+                    mid_mask = (freqs > low_freq_max) & (freqs <= mid_freq_max)
+                    high_mask = freqs > mid_freq_max
+                    
+                    # Calculate RMS energy for each band
+                    low_energy = float(np.sqrt(np.mean(magnitude[low_mask]**2))) if np.any(low_mask) else 0.0
+                    mid_energy = float(np.sqrt(np.mean(magnitude[mid_mask]**2))) if np.any(mid_mask) else 0.0
+                    high_energy = float(np.sqrt(np.mean(magnitude[high_mask]**2))) if np.any(high_mask) else 0.0
+                    
+                    low_band.append(low_energy)
+                    mid_band.append(mid_energy)
+                    high_band.append(high_energy)
+                else:
+                    # Not enough samples for FFT
+                    low_band.append(0.0)
+                    mid_band.append(0.0)
+                    high_band.append(0.0)
+            
+            # Resample frequency data to match amplitude data length
+            if len(low_band) != len(waveform_amplitude):
+                try:
+                    from scipy import interpolate
+                    x_old = np.linspace(0, 1, len(low_band))
+                    x_new = np.linspace(0, 1, len(waveform_amplitude))
+                    
+                    f_low = interpolate.interp1d(x_old, low_band, kind='linear', fill_value='extrapolate')
+                    f_mid = interpolate.interp1d(x_old, mid_band, kind='linear', fill_value='extrapolate')
+                    f_high = interpolate.interp1d(x_old, high_band, kind='linear', fill_value='extrapolate')
+                    
+                    low_band = [float(val) for val in f_low(x_new)]
+                    mid_band = [float(val) for val in f_mid(x_new)]
+                    high_band = [float(val) for val in f_high(x_new)]
+                except ImportError:
+                    # Simple linear interpolation using numpy
+                    ratio = len(waveform_amplitude) / len(low_band)
+                    new_indices = np.arange(len(waveform_amplitude)) / ratio
+                    low_band = [float(np.interp(new_indices, np.arange(len(low_band)), low_band)[i]) for i in range(len(waveform_amplitude))]
+                    mid_band = [float(np.interp(new_indices, np.arange(len(mid_band)), mid_band)[i]) for i in range(len(waveform_amplitude))]
+                    high_band = [float(np.interp(new_indices, np.arange(len(high_band)), high_band)[i]) for i in range(len(waveform_amplitude))]
+            
+            return low_band, mid_band, high_band
+        
+        low_freq_data, mid_freq_data, high_freq_data = process_frequency_bands()
+        
+        waveform_data = {
+            'amplitude': waveform_amplitude,  # Main waveform for display
+            'low': low_freq_data,
+            'mid': mid_freq_data, 
+            'high': high_freq_data
+        }
+        
+        # BPM Analysis
+        tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
+        beat_times = [float(t) for t in librosa.frames_to_time(beats, sr=sr).tolist()]
+        
+        # Generate grid markers based on BPM
+        beats_per_bar = 4  # Standard 4/4 time
+        bar_duration = (60.0 / float(tempo)) * beats_per_bar
+        grid_markers = []
+        current_time = 0.0
+        while current_time < duration:
+            grid_markers.append({
+                'time': float(current_time),
+                'type': 'bar' if len(grid_markers) % beats_per_bar == 0 else 'beat'
+            })
+            current_time += 60.0 / float(tempo)
+        
+        # Enhanced audio format info
+        audio_info = {
+            'sample_rate': int(sr),
+            'channels': 1 if len(y.shape) == 1 else y.shape[0],
+            'bit_depth': 32,  # librosa loads as float32
+            'format': os.path.splitext(filename)[1].lower()
+        }
         
         # Save to database
         song = Song(
@@ -400,12 +569,57 @@ def upload_song():
         return jsonify({
             'id': song.id,
             'name': song.name,
-            'duration': duration,
-            'waveform_data': waveform_data
+            'duration': float(duration),
+            'waveform_data': waveform_data,
+            'bpm': float(tempo),
+            'beat_times': beat_times,
+            'grid_markers': grid_markers,
+            'audio_info': audio_info
         })
     
     except Exception as e:
         return jsonify({'error': f'Error processing audio: {str(e)}'}), 500
+
+@app.route('/api/audio-preview/<int:song_id>')
+def audio_preview(song_id):
+    """Serve audio files for preview playback"""
+    try:
+        song = db.session.get(Song, song_id)
+        if not song:
+            return jsonify({'error': 'Song not found'}), 404
+        
+        # Security check - ensure file is within upload folder
+        file_path = os.path.abspath(song.file_path)
+        upload_folder = os.path.abspath(app.config['UPLOAD_FOLDER'])
+        
+        if not file_path.startswith(upload_folder):
+            return jsonify({'error': 'Invalid file path'}), 403
+            
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+            
+        # Get file info for proper content type
+        file_ext = os.path.splitext(song.filename)[1].lower()
+        content_types = {
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav', 
+            '.flac': 'audio/flac',
+            '.ogg': 'audio/ogg',
+            '.m4a': 'audio/mp4',
+            '.aac': 'audio/aac'
+        }
+        
+        content_type = content_types.get(file_ext, 'audio/mpeg')
+        
+        return send_file(
+            file_path,
+            mimetype=content_type,
+            as_attachment=False,
+            download_name=song.filename
+        )
+        
+    except Exception as e:
+        return jsonify({'error': f'Error serving audio: {str(e)}'}), 500
 
 @app.route('/api/save-device', methods=['POST'])
 def save_device():
@@ -420,7 +634,7 @@ def save_device():
         
         if device_id:
             # Update existing device
-            device = Device.query.get(device_id)
+            device = db.session.get(Device, device_id)
             if not device:
                 return jsonify({'error': 'Device not found'}), 404
             device.name = name
@@ -441,7 +655,7 @@ def save_device():
 @app.route('/api/get-device/<int:device_id>')
 def get_device(device_id):
     try:
-        device = Device.query.get(device_id)
+        device = db.session.get(Device, device_id)
         if not device:
             return jsonify({'error': 'Device not found'}), 404
         
@@ -463,7 +677,7 @@ def delete_device():
         data = request.get_json()
         device_id = data.get('device_id')
         
-        device = Device.query.get(device_id)
+        device = db.session.get(Device, device_id)
         if not device:
             return jsonify({'error': 'Device not found'}), 404
         
@@ -487,7 +701,7 @@ def patch_device():
         device_id = data.get('device_id')
         start_address = data.get('start_address')
         
-        device = Device.query.get(device_id)
+        device = db.session.get(Device, device_id)
         if not device:
             return jsonify({'error': 'Device not found'}), 404
         
@@ -531,7 +745,7 @@ def unpatch_device():
         data = request.get_json()
         patch_id = data.get('patch_id')
         
-        patch = PatchedDevice.query.get(patch_id)
+        patch = db.session.get(PatchedDevice, patch_id)
         if not patch:
             return jsonify({'error': 'Patch not found'}), 404
         
@@ -552,7 +766,7 @@ def update_patch_position():
         x_position = data.get('x_position')
         y_position = data.get('y_position')
         
-        patch = PatchedDevice.query.get(patch_id)
+        patch = db.session.get(PatchedDevice, patch_id)
         if not patch:
             return jsonify({'error': 'Patch not found'}), 404
         
@@ -647,7 +861,7 @@ def save_sequence():
         
         if sequence_id:
             # Update existing sequence
-            sequence = Sequence.query.get(sequence_id)
+            sequence = db.session.get(Sequence, sequence_id)
             if not sequence:
                 return jsonify({'error': 'Sequence not found'}), 404
             sequence.name = name
@@ -668,7 +882,7 @@ def save_sequence():
 @app.route('/api/get-sequence/<int:sequence_id>')
 def get_sequence(sequence_id):
     try:
-        sequence = Sequence.query.get(sequence_id)
+        sequence = db.session.get(Sequence, sequence_id)
         if not sequence:
             return jsonify({'error': 'Sequence not found'}), 404
         
@@ -697,7 +911,7 @@ def delete_sequence():
         data = request.get_json()
         sequence_id = data.get('sequence_id')
         
-        sequence = Sequence.query.get(sequence_id)
+        sequence = db.session.get(Sequence, sequence_id)
         if not sequence:
             return jsonify({'error': 'Sequence not found'}), 404
         
@@ -725,7 +939,7 @@ def duplicate_sequence():
         sequence_id = data.get('sequence_id')
         new_name = data.get('new_name')
         
-        original = Sequence.query.get(sequence_id)
+        original = db.session.get(Sequence, sequence_id)
         if not original:
             return jsonify({'error': 'Sequence not found'}), 404
         
@@ -759,7 +973,7 @@ def save_playlist():
         
         if playlist_id:
             # Update existing playlist
-            playlist = Playlist.query.get(playlist_id)
+            playlist = db.session.get(Playlist, playlist_id)
             if not playlist:
                 return jsonify({'error': 'Playlist not found'}), 404
             playlist.name = name
@@ -785,7 +999,7 @@ def delete_playlist():
         data = request.get_json()
         playlist_id = data.get('playlist_id')
         
-        playlist = Playlist.query.get(playlist_id)
+        playlist = db.session.get(Playlist, playlist_id)
         if not playlist:
             return jsonify({'error': 'Playlist not found'}), 404
         
@@ -805,7 +1019,7 @@ def toggle_playlist():
         playlist_id = data.get('playlist_id')
         is_active = data.get('is_active')
         
-        playlist = Playlist.query.get(playlist_id)
+        playlist = db.session.get(Playlist, playlist_id)
         if not playlist:
             return jsonify({'error': 'Playlist not found'}), 404
         
@@ -825,7 +1039,7 @@ def toggle_random_mode():
         playlist_id = data.get('playlist_id')
         random_mode = data.get('random_mode')
         
-        playlist = Playlist.query.get(playlist_id)
+        playlist = db.session.get(Playlist, playlist_id)
         if not playlist:
             return jsonify({'error': 'Playlist not found'}), 404
         
@@ -848,11 +1062,11 @@ def add_to_playlist():
         if not playlist_id or not sequence_id:
             return jsonify({'error': 'Playlist ID and Sequence ID are required'}), 400
         
-        playlist = Playlist.query.get(playlist_id)
+        playlist = db.session.get(Playlist, playlist_id)
         if not playlist:
             return jsonify({'error': 'Playlist not found'}), 404
         
-        sequence = Sequence.query.get(sequence_id)
+        sequence = db.session.get(Sequence, sequence_id)
         if not sequence:
             return jsonify({'error': 'Sequence not found'}), 404
         
@@ -878,7 +1092,7 @@ def remove_from_playlist():
         if not playlist_id or not sequence_id:
             return jsonify({'error': 'Playlist ID and Sequence ID are required'}), 400
         
-        playlist = Playlist.query.get(playlist_id)
+        playlist = db.session.get(Playlist, playlist_id)
         if not playlist:
             return jsonify({'error': 'Playlist not found'}), 404
         
@@ -919,7 +1133,7 @@ def import_sequence():
                 return jsonify({'error': f'Missing required field: {field}'}), 400
         
         # Validate song exists
-        song = Song.query.get(sequence_data['song_id'])
+        song = db.session.get(Song, sequence_data['song_id'])
         if not song:
             return jsonify({'error': 'Referenced song not found'}), 404
         
@@ -989,13 +1203,62 @@ def export_sequences():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/play-sequence', methods=['POST'])
+def play_sequence_endpoint():
+    try:
+        data = request.get_json()
+        print(f"Received data: {data}")  # Debug logging
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Check if we have a sequence ID (play existing sequence)
+        sequence_id = data.get('sequence_id') or data.get('id') or data.get('sequenceId')
+        
+        if sequence_id:
+            sequence = db.session.get(Sequence, sequence_id)
+            if not sequence:
+                return jsonify({'error': 'Sequence not found'}), 404
+            play_sequence(sequence)
+            return jsonify({'success': True})
+        
+        # Check if we have song_id and events (play temporary sequence)
+        song_id = data.get('song_id')
+        events = data.get('events', [])
+        start_time = data.get('start_time', 0)  # Get start time if provided
+        
+        if song_id is not None:
+            song = db.session.get(Song, song_id)
+            if not song:
+                return jsonify({'error': 'Song not found'}), 404
+            
+            # Create a temporary sequence object for playback
+            class TempSequence:
+                def __init__(self, song, events):
+                    self.id = 'temp'
+                    self.song = song
+                    self._events = events
+                
+                def get_events(self):
+                    return self._events
+            
+            temp_sequence = TempSequence(song, events)
+            play_sequence(temp_sequence, start_time)
+            return jsonify({'success': True})
+        
+        return jsonify({'error': 'Either sequence_id or song_id is required'}), 400
+    
+    except Exception as e:
+        print(f"Error in play_sequence_endpoint: {e}")  # Debug logging
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/play-sequence-by-id', methods=['POST'])
 def play_sequence_by_id():
     try:
         data = request.get_json()
         sequence_id = data.get('sequence_id')
         
-        sequence = Sequence.query.get(sequence_id)
+        sequence = db.session.get(Sequence, sequence_id)
         if not sequence:
             return jsonify({'error': 'Sequence not found'}), 404
         
@@ -1029,6 +1292,32 @@ def playback_status():
         else:
             return jsonify({'is_playing': False})
     
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pause-sequence', methods=['POST'])
+def pause_sequence():
+    try:
+        global is_playing
+        
+        if is_playing:
+            is_playing = False
+            audio_player.pause()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/resume-sequence', methods=['POST'])
+def resume_sequence():
+    try:
+        global is_playing
+        
+        if not is_playing and current_sequence:
+            is_playing = True
+            audio_player.resume()
+        
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1131,9 +1420,8 @@ def storage_info():
             'free': total - used
         }
         
-        # Get external storage info (placeholder)
-        external_storage = []
-        # In a real implementation, you would scan for mounted USB devices
+        # Get external storage info
+        external_storage = scan_external_storage()
         
         return jsonify({
             'success': True,
@@ -1149,16 +1437,12 @@ def storage_info():
 @app.route('/api/network-status')
 def network_status():
     try:
-        # Placeholder implementation
-        # In a real implementation, you would check actual network status
+        # Get actual network status using nmcli or ip commands
+        network_info = get_network_status()
+        
         return jsonify({
             'success': True,
-            'data': {
-                'connected': True,
-                'ssid': 'Test Network',
-                'ip_address': '192.168.1.100',
-                'mode': 'wifi'
-            }
+            'data': network_info
         })
     
     except Exception as e:
@@ -1167,16 +1451,646 @@ def network_status():
 @app.route('/api/wifi-networks')
 def wifi_networks():
     try:
-        # Placeholder implementation
-        # In a real implementation, you would scan for actual WiFi networks
-        networks = [
-            {'ssid': 'Home WiFi', 'signal': 85, 'encrypted': True, 'connected': True},
-            {'ssid': 'Guest Network', 'signal': 70, 'encrypted': False, 'connected': False},
-            {'ssid': 'Neighbor WiFi', 'signal': 45, 'encrypted': True, 'connected': False}
-        ]
+        # Scan for actual WiFi networks
+        networks = scan_wifi_networks()
         
         return jsonify({'success': True, 'networks': networks})
     
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Network management helper functions
+def get_network_status():
+    """Get current network connection status"""
+    try:
+        # Try nmcli first (NetworkManager)
+        result = subprocess.run(['nmcli', 'connection', 'show', '--active'], 
+                              capture_output=True, text=True, timeout=10)
+        
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            if len(lines) > 1:  # Skip header
+                active_connection = lines[1].split()
+                if len(active_connection) >= 3:
+                    conn_name = active_connection[0]
+                    conn_type = active_connection[2]
+                    
+                    # Get IP address
+                    ip_result = subprocess.run(['ip', 'route', 'get', '1'], 
+                                             capture_output=True, text=True, timeout=5)
+                    ip_address = None
+                    if ip_result.returncode == 0:
+                        for part in ip_result.stdout.split():
+                            if part.startswith('src'):
+                                ip_index = ip_result.stdout.split().index(part)
+                                if ip_index + 1 < len(ip_result.stdout.split()):
+                                    ip_address = ip_result.stdout.split()[ip_index + 1]
+                                    break
+                    
+                    return {
+                        'connected': True,
+                        'ssid': conn_name,
+                        'ip_address': ip_address or 'Unknown',
+                        'mode': 'wifi' if 'wifi' in conn_type.lower() else 'ethernet'
+                    }
+        
+        # Fallback: check if we have any network interface up
+        result = subprocess.run(['ip', 'addr', 'show'], 
+                              capture_output=True, text=True, timeout=5)
+        
+        if result.returncode == 0 and 'inet ' in result.stdout:
+            return {
+                'connected': True,
+                'ssid': 'Unknown',
+                'ip_address': 'Connected',
+                'mode': 'unknown'
+            }
+        
+        return {
+            'connected': False,
+            'ssid': None,
+            'ip_address': None,
+            'mode': 'disconnected'
+        }
+        
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, Exception):
+        # Return basic connection check
+        try:
+            result = subprocess.run(['ping', '-c', '1', '8.8.8.8'], 
+                                  capture_output=True, timeout=3)
+            connected = result.returncode == 0
+            return {
+                'connected': connected,
+                'ssid': 'Unknown' if connected else None,
+                'ip_address': 'Connected' if connected else None,
+                'mode': 'unknown' if connected else 'disconnected'
+            }
+        except:
+            return {
+                'connected': False,
+                'ssid': None,
+                'ip_address': None,
+                'mode': 'disconnected'
+            }
+
+def scan_wifi_networks():
+    """Scan for available WiFi networks"""
+    networks = []
+    
+    try:
+        # Try nmcli first (NetworkManager)
+        result = subprocess.run(['nmcli', 'device', 'wifi', 'list'], 
+                              capture_output=True, text=True, timeout=15)
+        
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            current_ssid = get_current_ssid()
+            
+            for line in lines[1:]:  # Skip header
+                parts = line.split()
+                if len(parts) >= 6:
+                    # Parse nmcli output: * SSID MODE CHAN RATE SIGNAL BARS SECURITY
+                    connected = parts[0] == '*'
+                    ssid = parts[1] if not connected else parts[2]
+                    
+                    if ssid == '--':
+                        continue
+                        
+                    # Extract signal strength (remove % and dBm)
+                    signal_str = parts[5] if not connected else parts[6]
+                    signal = 0
+                    try:
+                        if signal_str.endswith('%'):
+                            signal = int(signal_str[:-1])
+                        elif 'dBm' in signal_str:
+                            # Convert dBm to percentage (rough approximation)
+                            dbm = int(signal_str.split()[0])
+                            signal = max(0, min(100, (dbm + 100) * 2))
+                    except:
+                        signal = 0
+                    
+                    # Check if encrypted
+                    security = ' '.join(parts[7:]) if not connected else ' '.join(parts[8:])
+                    encrypted = 'WPA' in security or 'WEP' in security
+                    
+                    networks.append({
+                        'ssid': ssid,
+                        'signal': signal,
+                        'encrypted': encrypted,
+                        'connected': connected or ssid == current_ssid
+                    })
+            
+            return networks
+            
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        pass
+    
+    try:
+        # Fallback to iwlist (older systems)
+        result = subprocess.run(['iwlist', 'scan'], 
+                              capture_output=True, text=True, timeout=15)
+        
+        if result.returncode == 0:
+            current_ssid = get_current_ssid()
+            
+            # Parse iwlist output
+            network = {}
+            for line in result.stdout.split('\n'):
+                line = line.strip()
+                
+                if 'Cell' in line and 'Address:' in line:
+                    if network and 'ssid' in network:
+                        networks.append(network)
+                    network = {}
+                    
+                elif 'ESSID:' in line:
+                    ssid = line.split('ESSID:')[1].strip('"')
+                    if ssid and ssid != '<hidden>':
+                        network['ssid'] = ssid
+                        network['connected'] = ssid == current_ssid
+                        
+                elif 'Quality=' in line:
+                    try:
+                        quality_part = line.split('Quality=')[1].split()[0]
+                        if '/' in quality_part:
+                            current, maximum = quality_part.split('/')
+                            signal = int((int(current) / int(maximum)) * 100)
+                            network['signal'] = signal
+                    except:
+                        network['signal'] = 0
+                        
+                elif 'Encryption key:' in line:
+                    encrypted = 'on' in line.lower()
+                    network['encrypted'] = encrypted
+            
+            # Add last network
+            if network and 'ssid' in network:
+                networks.append(network)
+                
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        pass
+    
+    # Remove duplicates and sort by signal strength
+    unique_networks = {}
+    for network in networks:
+        ssid = network.get('ssid')
+        if ssid and (ssid not in unique_networks or 
+                    network.get('signal', 0) > unique_networks[ssid].get('signal', 0)):
+            unique_networks[ssid] = network
+    
+    return sorted(unique_networks.values(), key=lambda x: x.get('signal', 0), reverse=True)
+
+def get_current_ssid():
+    """Get currently connected WiFi SSID"""
+    try:
+        result = subprocess.run(['nmcli', 'connection', 'show', '--active'], 
+                              capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            for line in lines[1:]:
+                if 'wifi' in line.lower():
+                    return line.split()[0]
+    except:
+        pass
+    
+    try:
+        result = subprocess.run(['iwgetid', '-r'], 
+                              capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except:
+        pass
+    
+    return None
+
+def scan_external_storage():
+    """Scan for mounted external storage devices"""
+    external_devices = []
+    
+    try:
+        # Read /proc/mounts to find mounted USB devices
+        with open('/proc/mounts', 'r') as f:
+            mounts = f.read()
+        
+        # Look for typical USB mount points
+        usb_patterns = ['/media/', '/mnt/', '/run/media/']
+        
+        for line in mounts.split('\n'):
+            if not line.strip():
+                continue
+                
+            parts = line.split()
+            if len(parts) >= 3:
+                device, mount_point, fs_type = parts[:3]
+                
+                # Skip system mounts
+                if any(mount_point.startswith(pattern) for pattern in usb_patterns):
+                    try:
+                        # Get storage info
+                        statvfs = os.statvfs(mount_point)
+                        total = statvfs.f_frsize * statvfs.f_blocks
+                        used = total - (statvfs.f_frsize * statvfs.f_bavail)
+                        
+                        # Get device name
+                        device_name = os.path.basename(mount_point)
+                        
+                        external_devices.append({
+                            'device': device,
+                            'mount_point': mount_point,
+                            'name': device_name,
+                            'filesystem': fs_type,
+                            'total': total,
+                            'used': used,
+                            'free': total - used
+                        })
+                    except OSError:
+                        continue
+                        
+    except Exception:
+        pass
+    
+    return external_devices
+
+# Additional network management routes
+@app.route('/api/connect-wifi', methods=['POST'])
+def connect_wifi():
+    try:
+        data = request.get_json()
+        ssid = data.get('ssid')
+        password = data.get('password')
+        
+        if not ssid:
+            return jsonify({'error': 'SSID is required'}), 400
+        
+        # Try to connect using nmcli
+        cmd = ['nmcli', 'device', 'wifi', 'connect', ssid]
+        if password:
+            cmd.extend(['password', password])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'message': f'Connected to {ssid}'
+            })
+        else:
+            return jsonify({
+                'error': f'Failed to connect: {result.stderr.strip()}'
+            }), 500
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Connection timeout'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/disconnect-wifi', methods=['POST'])
+def disconnect_wifi():
+    try:
+        result = subprocess.run(['nmcli', 'connection', 'down', 'id', 'wifi'], 
+                              capture_output=True, text=True, timeout=10)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Disconnected from WiFi'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/configure-hotspot', methods=['POST'])
+def configure_hotspot():
+    try:
+        data = request.get_json()
+        ssid = data.get('ssid', 'DMX-Control-Hotspot')
+        password = data.get('password', 'dmxcontrol123')
+        
+        # Create hotspot using nmcli
+        result = subprocess.run([
+            'nmcli', 'connection', 'add', 'type', 'wifi', 'ifname', 'wlan0',
+            'con-name', 'Hotspot', 'autoconnect', 'yes', 'ssid', ssid,
+            'wifi.mode', 'ap', 'wifi.band', 'bg', 'ipv4.method', 'shared',
+            'wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password
+        ], capture_output=True, text=True, timeout=15)
+        
+        if result.returncode == 0:
+            # Activate the hotspot
+            activate_result = subprocess.run([
+                'nmcli', 'connection', 'up', 'Hotspot'
+            ], capture_output=True, text=True, timeout=10)
+            
+            if activate_result.returncode == 0:
+                return jsonify({
+                    'success': True,
+                    'message': f'Hotspot "{ssid}" configured and activated'
+                })
+            else:
+                return jsonify({
+                    'error': f'Hotspot configured but failed to activate: {activate_result.stderr.strip()}'
+                }), 500
+        else:
+            return jsonify({
+                'error': f'Failed to configure hotspot: {result.stderr.strip()}'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/disable-hotspot', methods=['POST'])
+def disable_hotspot():
+    try:
+        result = subprocess.run(['nmcli', 'connection', 'down', 'Hotspot'], 
+                              capture_output=True, text=True, timeout=10)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Hotspot disabled'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# System management routes
+@app.route('/api/save-security-settings', methods=['POST'])
+def save_security_settings():
+    try:
+        data = request.get_json()
+        
+        # Store security settings in a config file
+        config_dir = os.path.expanduser('~/.dmx_control')
+        os.makedirs(config_dir, exist_ok=True)
+        config_file = os.path.join(config_dir, 'security.json')
+        
+        settings = {
+            'authentication_enabled': data.get('authentication_enabled', False),
+            'password_hash': data.get('password_hash', ''),
+            'session_timeout': data.get('session_timeout', 3600),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        with open(config_file, 'w') as f:
+            json.dump(settings, f, indent=2)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Security settings saved'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system-settings')
+def system_settings():
+    try:
+        config_dir = os.path.expanduser('~/.dmx_control')
+        config_file = os.path.join(config_dir, 'system.json')
+        
+        default_settings = {
+            'device_name': 'DMX Control System',
+            'auto_start': True,
+            'dmx_refresh_rate': 25,
+            'audio_buffer_size': 1024,
+            'max_sequences': 100,
+            'backup_enabled': True,
+            'debug_mode': False
+        }
+        
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                settings = json.load(f)
+                # Merge with defaults for missing keys
+                for key, value in default_settings.items():
+                    if key not in settings:
+                        settings[key] = value
+        else:
+            settings = default_settings
+        
+        return jsonify({
+            'success': True,
+            'data': settings
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/save-system-settings', methods=['POST'])
+def save_system_settings():
+    try:
+        data = request.get_json()
+        
+        config_dir = os.path.expanduser('~/.dmx_control')
+        os.makedirs(config_dir, exist_ok=True)
+        config_file = os.path.join(config_dir, 'system.json')
+        
+        settings = {
+            'device_name': data.get('device_name', 'DMX Control System'),
+            'auto_start': data.get('auto_start', True),
+            'dmx_refresh_rate': data.get('dmx_refresh_rate', 25),
+            'audio_buffer_size': data.get('audio_buffer_size', 1024),
+            'max_sequences': data.get('max_sequences', 100),
+            'backup_enabled': data.get('backup_enabled', True),
+            'debug_mode': data.get('debug_mode', False),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        with open(config_file, 'w') as f:
+            json.dump(settings, f, indent=2)
+        
+        return jsonify({
+            'success': True,
+            'message': 'System settings saved'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/export-all-settings')
+def export_all_settings():
+    try:
+        config_dir = os.path.expanduser('~/.dmx_control')
+        
+        # Collect all settings
+        all_settings = {
+            'exported_at': datetime.now().isoformat(),
+            'version': '1.0'
+        }
+        
+        # Load system settings
+        system_file = os.path.join(config_dir, 'system.json')
+        if os.path.exists(system_file):
+            with open(system_file, 'r') as f:
+                all_settings['system'] = json.load(f)
+        
+        # Load security settings (excluding sensitive data)
+        security_file = os.path.join(config_dir, 'security.json')
+        if os.path.exists(security_file):
+            with open(security_file, 'r') as f:
+                security_settings = json.load(f)
+                # Remove sensitive data
+                security_settings.pop('password_hash', None)
+                all_settings['security'] = security_settings
+        
+        # Export database data
+        devices = [{'id': d.id, 'name': d.name, 'channels': d.get_channels()} 
+                  for d in Device.query.all()]
+        all_settings['devices'] = devices
+        
+        patched_devices = [{'id': p.id, 'device_id': p.device_id, 'dmx_address': p.dmx_address,
+                           'x_position': p.x_position, 'y_position': p.y_position} 
+                          for p in PatchedDevice.query.all()]
+        all_settings['patched_devices'] = patched_devices
+        
+        playlists = [{'id': p.id, 'name': p.name, 'sequence_ids': p.get_sequence_ids()}
+                    for p in Playlist.query.all()]
+        all_settings['playlists'] = playlists
+        
+        # Create export file
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'dmx_settings_export_{timestamp}.json'
+        export_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        
+        with open(export_path, 'w') as f:
+            json.dump(all_settings, f, indent=2)
+        
+        return send_file(export_path, as_attachment=True, download_name=filename)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/import-settings', methods=['POST'])
+def import_settings():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Read and parse the JSON file
+        try:
+            settings_data = json.load(file)
+        except json.JSONDecodeError:
+            return jsonify({'error': 'Invalid JSON file'}), 400
+        
+        # Validate the file format
+        if 'version' not in settings_data:
+            return jsonify({'error': 'Invalid settings file format'}), 400
+        
+        config_dir = os.path.expanduser('~/.dmx_control')
+        os.makedirs(config_dir, exist_ok=True)
+        
+        # Import system settings
+        if 'system' in settings_data:
+            system_file = os.path.join(config_dir, 'system.json')
+            with open(system_file, 'w') as f:
+                json.dump(settings_data['system'], f, indent=2)
+        
+        # Import security settings (user will need to reconfigure passwords)
+        if 'security' in settings_data:
+            security_file = os.path.join(config_dir, 'security.json')
+            with open(security_file, 'w') as f:
+                json.dump(settings_data['security'], f, indent=2)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Settings imported successfully. Please restart the system to apply changes.'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/restart-system', methods=['POST'])
+def restart_system():
+    try:
+        # First try systemctl restart for the service
+        try:
+            subprocess.run(['sudo', 'systemctl', 'restart', 'dmx-control.service'], 
+                          capture_output=True, timeout=5)
+            return jsonify({
+                'success': True,
+                'message': 'System service restarted'
+            })
+        except:
+            pass
+        
+        # Fallback: restart the Python application
+        import signal
+        import sys
+        
+        def restart_app():
+            time.sleep(1)  # Give time for response to be sent
+            os.execv(sys.executable, ['python'] + sys.argv)
+        
+        threading.Thread(target=restart_app).start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Application restarting...'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/factory-reset', methods=['POST'])
+def factory_reset():
+    try:
+        data = request.get_json()
+        confirm = data.get('confirm', False)
+        
+        if not confirm:
+            return jsonify({'error': 'Factory reset requires confirmation'}), 400
+        
+        # Create backup before reset
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_dir = os.path.join(os.path.expanduser('~'), 'dmx_control_backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        # Backup database
+        import shutil
+        db_path = 'lighting_control.db'  # Update with actual database path
+        if os.path.exists(db_path):
+            backup_db = os.path.join(backup_dir, f'pre_reset_db_{timestamp}.db')
+            shutil.copy2(db_path, backup_db)
+        
+        # Clear database
+        with app.app_context():
+            db.drop_all()
+            db.create_all()
+        
+        # Clear config files
+        config_dir = os.path.expanduser('~/.dmx_control')
+        if os.path.exists(config_dir):
+            backup_config = os.path.join(backup_dir, f'pre_reset_config_{timestamp}')
+            shutil.copytree(config_dir, backup_config)
+            shutil.rmtree(config_dir)
+        
+        # Clear uploads (but keep a backup)
+        upload_dir = app.config.get('UPLOAD_FOLDER', 'uploads')
+        if os.path.exists(upload_dir):
+            backup_uploads = os.path.join(backup_dir, f'pre_reset_uploads_{timestamp}')
+            shutil.copytree(upload_dir, backup_uploads)
+            shutil.rmtree(upload_dir)
+            os.makedirs(upload_dir, exist_ok=True)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Factory reset completed. Backup saved to {backup_dir}'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/dmx-status')
+def get_dmx_status():
+    """Get current DMX channel values for real-time monitoring"""
+    try:
+        return jsonify({
+            'success': True,
+            'channels': dmx_controller.dmx_data,
+            'timestamp': time.time()
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

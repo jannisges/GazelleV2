@@ -46,8 +46,8 @@
                             <br>
                             <small class="text-muted">
                                 Address: {{ patch.start_address }}
-                                {% if patch.device.get_channels()|length > 1 %}
-                                - {{ patch.start_address + patch.device.get_channels()|length - 1 }}
+                                {% if patch.device.channels|length > 1 %}
+                                - {{ patch.start_address + patch.device.channels|length - 1 }}
                                 {% endif %}
                             </small>
                         </div>

@@ -7,10 +7,12 @@
     .waveform-container {
         width: 100%;
         height: 200px;
-        border: 1px solid #ccc;
+        border: 1px solid #444;
         margin: 10px 0;
         position: relative;
         overflow: hidden;
+        background: #1a1a1a;
+        border-radius: 4px;
     }
     
     .sequence-container {
@@ -56,12 +58,12 @@
         width: 1px;
         height: 100%;
         background: #666;
-        opacity: 0.3;
+        opacity: 0.5;
     }
     
     .timeline-marker.major {
-        background: #333;
-        opacity: 0.7;
+        background: #999;
+        opacity: 0.8;
         width: 2px;
     }
     
@@ -69,8 +71,11 @@
         position: absolute;
         bottom: 2px;
         font-size: 10px;
-        color: #666;
+        color: #999;
         transform: translateX(-50%);
+        background: rgba(0,0,0,0.7);
+        padding: 1px 3px;
+        border-radius: 2px;
     }
     
     .playhead {
@@ -191,11 +196,8 @@
                     <div class="row align-items-center">
                         <div class="col-md-6">
                             <div class="btn-group" role="group">
-                                <button class="btn btn-outline-primary" onclick="playSequence()">
+                                <button id="playPauseButton" class="btn btn-outline-primary" onclick="playSequence()">
                                     <i class="bi bi-play"></i> Play
-                                </button>
-                                <button class="btn btn-outline-secondary" onclick="pauseSequence()">
-                                    <i class="bi bi-pause"></i> Pause
                                 </button>
                                 <button class="btn btn-outline-danger" onclick="stopSequence()">
                                     <i class="bi bi-stop"></i> Stop
@@ -312,6 +314,9 @@
     let zoomLevel = 1;
     let isExpanded = false;
     let patchedDevices = [];
+    let isPlaying = false;
+    let playbackInterval = null;
+    let currentPosition = 0;
     
     // Initialize the application
     document.addEventListener('DOMContentLoaded', function() {
@@ -321,6 +326,40 @@
         loadPatchedDevices();
         setupEventListeners();
     });
+    
+    function setupEventListeners() {
+        // Listen for waveform seek events
+        const waveformCanvas = document.getElementById('waveformCanvas');
+        if (waveformCanvas) {
+            waveformCanvas.addEventListener('waveform-seek', (e) => {
+                const seekTime = e.detail.time;
+                seekToPosition(seekTime);
+            });
+        }
+        
+        console.log('Event listeners setup complete');
+    }
+    
+    function seekToPosition(time) {
+        console.log('Seeking to position:', time);
+        currentPosition = Math.max(0, time);
+        updatePlayheads(currentPosition);
+        updatePositionDisplay(currentPosition);
+        
+        // If playing, stop first, then the next play will start from the new position
+        if (isPlaying) {
+            console.log('Stopping for seek');
+            isPlaying = false;
+            stopPlaybackTracking();
+            updatePlayButton();
+            
+            fetch('/api/stop-sequence', { method: 'POST' })
+            .then(() => {
+                console.log('Stopped for seek, ready to play from new position');
+            })
+            .catch(error => console.error('Error stopping for seek:', error));
+        }
+    }
     
     function openFileDialog() {
         document.getElementById('audioFileInput').click();
@@ -333,25 +372,45 @@
         const formData = new FormData();
         formData.append('file', file);
         
+        // Show loading indicator
+        const uploadButton = document.querySelector('[onclick="openFileDialog()"]');
+        const originalText = uploadButton.innerHTML;
+        uploadButton.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing...';
+        uploadButton.disabled = true;
+        
         fetch('/api/upload-song', {
             method: 'POST',
             body: formData
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
+            console.log('Upload response:', data);
             if (data.error) {
                 alert('Error: ' + data.error);
                 return;
             }
             
             currentSong = data;
+            console.log('Current song set:', currentSong);
             updateSongInfo();
-            renderWaveform(data.waveform_data);
+            console.log('Calling renderWaveform with:', data.waveform_data);
+            renderWaveform(data.waveform_data, data.duration);
             updateTimeline();
+            alert('File uploaded and processed successfully!');
         })
         .catch(error => {
             console.error('Error uploading file:', error);
-            alert('Error uploading file');
+            alert('Error uploading file: ' + error.message);
+        })
+        .finally(() => {
+            // Restore upload button
+            uploadButton.innerHTML = originalText;
+            uploadButton.disabled = false;
         });
     }
     
@@ -372,8 +431,10 @@
     
     function updateZoom() {
         zoomLevel = parseInt(document.getElementById('zoomSlider').value);
+        if (window.waveformRenderer) {
+            window.waveformRenderer.setZoomLevel(zoomLevel);
+        }
         updateTimeline();
-        renderWaveform();
         renderSequence();
     }
     
@@ -381,7 +442,28 @@
         isExpanded = !isExpanded;
         const container = document.getElementById('sequenceContainer');
         container.classList.toggle('sequence-expanded', isExpanded);
-        renderSequence();
+        if (window.sequenceEditor) {
+            window.sequenceEditor.render();
+        }
+    }
+    
+    function updateDeviceList() {
+        // Update device list in event modal
+        const deviceList = document.getElementById('deviceList');
+        if (deviceList) {
+            deviceList.innerHTML = '';
+            patchedDevices.forEach(patch => {
+                const checkbox = document.createElement('div');
+                checkbox.className = 'form-check';
+                checkbox.innerHTML = `
+                    <input class="form-check-input" type="checkbox" value="${patch.id}" id="device_${patch.id}">
+                    <label class="form-check-label" for="device_${patch.id}">
+                        ${patch.device.name} (DMX: ${patch.start_address})
+                    </label>
+                `;
+                deviceList.appendChild(checkbox);
+            });
+        }
     }
     
     function loadPatchedDevices() {
@@ -389,7 +471,9 @@
             .then(response => response.json())
             .then(data => {
                 patchedDevices = data;
-                renderLightFixtures();
+                if (window.lightPreview) {
+                    window.lightPreview.loadPatchedDevices(data);
+                }
                 updateDeviceList();
             })
             .catch(error => console.error('Error loading patched devices:', error));
@@ -496,24 +580,83 @@
             return;
         }
         
-        fetch('/api/play-sequence', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                song_id: currentSong.id,
-                events: currentSequence.events
+        if (!isPlaying) {
+            console.log('Starting playback from position:', currentPosition);
+            // Start playing from current position
+            fetch('/api/play-sequence', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    song_id: currentSong.id,
+                    events: currentSequence.events,
+                    start_time: currentPosition
+                })
             })
-        });
+            .then(response => response.json())
+            .then(data => {
+                console.log('Play response:', data);
+                if (data.success) {
+                    isPlaying = true;
+                    updatePlayButton();
+                    // Delay starting tracking to avoid immediate state conflicts
+                    setTimeout(() => {
+                        startPlaybackTracking();
+                    }, 200);
+                }
+            })
+            .catch(error => {
+                console.error('Error starting playback:', error);
+                alert('Error starting playback: ' + error.message);
+            });
+        } else {
+            // Resume playing
+            console.log('Resuming playback');
+            fetch('/api/resume-sequence', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Resume response:', data);
+                if (data.success) {
+                    isPlaying = true;
+                    updatePlayButton();
+                    startPlaybackTracking();
+                }
+            })
+            .catch(error => {
+                console.error('Error resuming playback:', error);
+                alert('Error resuming playback: ' + error.message);
+            });
+        }
     }
     
     function pauseSequence() {
-        fetch('/api/pause-sequence', { method: 'POST' });
+        fetch('/api/pause-sequence', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                isPlaying = false;
+                stopPlaybackTracking();
+                updatePlayButton();
+            }
+        })
+        .catch(error => console.error('Error pausing playback:', error));
     }
     
     function stopSequence() {
-        fetch('/api/stop-sequence', { method: 'POST' });
+        fetch('/api/stop-sequence', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                isPlaying = false;
+                currentPosition = 0;
+                stopPlaybackTracking();
+                updatePlayButton();
+                updatePlayheads(0);
+                updatePositionDisplay(0);
+            }
+        })
+        .catch(error => console.error('Error stopping playback:', error));
     }
     
     function updateMasterDimmer() {
@@ -536,6 +679,94 @@
     
     function blackout() {
         fetch('/api/blackout', { method: 'POST' });
+    }
+    
+    function startPlaybackTracking() {
+        stopPlaybackTracking(); // Clear any existing interval
+        console.log('Starting playback tracking');
+        
+        playbackInterval = setInterval(() => {
+            if (isPlaying) {
+                fetch('/api/playback-status')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Playback status:', data);
+                    if (data.is_playing) {
+                        currentPosition = data.current_time || 0;
+                        updatePlayheads(currentPosition);
+                        updatePositionDisplay(currentPosition);
+                        
+                        // Update waveform renderer
+                        if (window.waveformRenderer) {
+                            window.waveformRenderer.setCurrentTime(currentPosition);
+                            window.waveformRenderer.setPlaying(true);
+                        }
+                    } else {
+                        console.log('Backend reports not playing, stopping tracking');
+                        isPlaying = false;
+                        stopPlaybackTracking();
+                        updatePlayButton();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching playback status:', error);
+                    // Don't automatically stop on error, might be temporary
+                });
+            } else {
+                console.log('Local state shows not playing, stopping tracking');
+                stopPlaybackTracking();
+            }
+        }, 250); // Update every 250ms - less frequent to reduce conflicts
+    }
+    
+    function stopPlaybackTracking() {
+        if (playbackInterval) {
+            clearInterval(playbackInterval);
+            playbackInterval = null;
+        }
+        
+        // Stop waveform animation
+        if (window.waveformRenderer) {
+            window.waveformRenderer.setPlaying(false);
+        }
+    }
+    
+    function updatePlayheads(time) {
+        if (!currentSong || currentSong.duration === 0) return;
+        
+        // Calculate position as percentage
+        const percentage = (time / currentSong.duration) * 100;
+        
+        // Update waveform playhead
+        const waveformPlayhead = document.getElementById('waveformPlayhead');
+        if (waveformPlayhead && window.waveformRenderer) {
+            const pixelPosition = window.waveformRenderer.timeToPixel(time);
+            waveformPlayhead.style.left = pixelPosition + 'px';
+        }
+        
+        // Update sequence playhead
+        const sequencePlayhead = document.getElementById('sequencePlayhead');
+        if (sequencePlayhead && window.sequenceEditor) {
+            const pixelPosition = window.sequenceEditor.timeToPixel(time);
+            sequencePlayhead.style.left = pixelPosition + 'px';
+        }
+    }
+    
+    function updatePositionDisplay(time) {
+        document.getElementById('currentPosition').textContent = formatTime(time);
+    }
+    
+    function updatePlayButton() {
+        const playButton = document.getElementById('playPauseButton');
+        if (playButton) {
+            if (isPlaying) {
+                playButton.innerHTML = '<i class="bi bi-pause"></i> Pause';
+                playButton.onclick = pauseSequence;
+            } else {
+                playButton.innerHTML = '<i class="bi bi-play"></i> Play';
+                playButton.onclick = playSequence;
+            }
+        }
     }
 </script>
 {% endblock %}
