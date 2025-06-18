@@ -59,6 +59,21 @@ class SequenceEditor {
         this.render();
     }
     
+    setDuration(duration) {
+        this.duration = duration;
+        this.updateMarkers();
+    }
+    
+    setCurrentTime(time) {
+        this.currentTime = time;
+        // Update playhead position if it exists
+        const playhead = document.getElementById('sequencePlayhead');
+        if (playhead) {
+            const pixelPosition = this.timeToPixel(time);
+            playhead.style.left = pixelPosition + 'px';
+        }
+    }
+    
     addEvent(eventData) {
         const event = {
             id: Date.now(),
@@ -397,13 +412,13 @@ class SequenceEditor {
     timeToPixel(time) {
         if (this.duration === 0) return 0;
         const visibleDuration = this.duration / this.zoomLevel;
-        const startTime = this.scrollPosition * this.duration / this.zoomLevel;
+        const startTime = this.scrollPosition * (this.duration - visibleDuration);
         return ((time - startTime) / visibleDuration) * this.container.clientWidth;
     }
     
     pixelToTime(pixel) {
         const visibleDuration = this.duration / this.zoomLevel;
-        const startTime = this.scrollPosition * this.duration / this.zoomLevel;
+        const startTime = this.scrollPosition * (this.duration - visibleDuration);
         return startTime + (pixel / this.container.clientWidth) * visibleDuration;
     }
     

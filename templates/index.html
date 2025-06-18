@@ -88,24 +88,6 @@
         pointer-events: none;
     }
     
-    .light-preview {
-        width: 100%;
-        height: 300px;
-        border: 1px solid #ccc;
-        background: #000;
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .light-fixture {
-        position: absolute;
-        width: 30px;
-        height: 30px;
-        border-radius: 15px;
-        border: 2px solid #fff;
-        cursor: pointer;
-        transition: all 0.1s ease;
-    }
     
     .control-panel {
         background: #f8f9fa;
@@ -132,7 +114,7 @@
 
 {% block content %}
 <div class="row">
-    <div class="col-md-8">
+    <div class="col-md-12">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5><i class="bi bi-music-note"></i> Audio & Sequence Editor</h5>
@@ -217,46 +199,6 @@
             </div>
         </div>
     </div>
-    
-    <div class="col-md-4">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="bi bi-lightbulb"></i> Light Preview</h5>
-            </div>
-            <div class="card-body p-0">
-                <div class="light-preview" id="lightPreview">
-                    <!-- Light fixtures will be rendered here -->
-                </div>
-            </div>
-        </div>
-        
-        <div class="card mt-3">
-            <div class="card-header">
-                <h5><i class="bi bi-sliders"></i> Quick Controls</h5>
-            </div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label">Master Dimmer</label>
-                    <input type="range" class="form-range" id="masterDimmer" min="0" max="100" value="100" onchange="updateMasterDimmer()">
-                    <div class="d-flex justify-content-between">
-                        <small>0%</small>
-                        <small>100%</small>
-                    </div>
-                </div>
-                
-                <div class="mb-3">
-                    <label class="form-label">Master Color</label>
-                    <input type="color" class="form-control form-control-color" id="masterColor" value="#ffffff" onchange="updateMasterColor()">
-                </div>
-                
-                <div class="d-grid">
-                    <button class="btn btn-warning" onclick="blackout()">
-                        <i class="bi bi-power"></i> Blackout
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 
 <!-- Event Modal -->
@@ -307,7 +249,6 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/waveform.js') }}"></script>
 <script src="{{ url_for('static', filename='js/sequence-editor.js') }}"></script>
-<script src="{{ url_for('static', filename='js/light-preview.js') }}"></script>
 <script>
     let currentSong = null;
     let currentSequence = { events: [] };
@@ -317,12 +258,14 @@
     let isPlaying = false;
     let playbackInterval = null;
     let currentPosition = 0;
+    let playStartTime = 0;
+    let playStartPosition = 0;
+    let lastUIUpdate = 0;
     
     // Initialize the application
     document.addEventListener('DOMContentLoaded', function() {
         initializeWaveform();
         initializeSequenceEditor();
-        initializeLightPreview();
         loadPatchedDevices();
         setupEventListeners();
     });
@@ -343,8 +286,23 @@
     function seekToPosition(time) {
         console.log('Seeking to position:', time);
         currentPosition = Math.max(0, time);
+        
+        // Reset client-side tracking variables
+        playStartTime = Date.now();
+        playStartPosition = currentPosition;
+        
         updatePlayheads(currentPosition);
         updatePositionDisplay(currentPosition);
+        
+        // Update waveform renderer
+        if (window.waveformRenderer) {
+            window.waveformRenderer.setCurrentTime(currentPosition);
+        }
+        
+        // Update sequence editor
+        if (window.sequenceEditor) {
+            window.sequenceEditor.setCurrentTime(currentPosition);
+        }
         
         // If playing, stop first, then the next play will start from the new position
         if (isPlaying) {
@@ -421,6 +379,11 @@
         document.getElementById('songDuration').textContent = `Duration: ${formatTime(currentSong.duration)}`;
         document.getElementById('totalDuration').textContent = formatTime(currentSong.duration);
         document.getElementById('songInfo').style.display = 'block';
+        
+        // Update sequence editor duration
+        if (window.sequenceEditor) {
+            window.sequenceEditor.setDuration(currentSong.duration);
+        }
     }
     
     function formatTime(seconds) {
@@ -471,9 +434,6 @@
             .then(response => response.json())
             .then(data => {
                 patchedDevices = data;
-                if (window.lightPreview) {
-                    window.lightPreview.loadPatchedDevices(data);
-                }
                 updateDeviceList();
             })
             .catch(error => console.error('Error loading patched devices:', error));
@@ -600,10 +560,21 @@
                 if (data.success) {
                     isPlaying = true;
                     updatePlayButton();
-                    // Delay starting tracking to avoid immediate state conflicts
-                    setTimeout(() => {
+                    // Get initial server position for accurate tracking
+                    fetch('/api/playback-status')
+                    .then(response => response.json())
+                    .then(statusData => {
+                        if (statusData.is_playing && statusData.current_time !== undefined) {
+                            syncWithServerPosition(statusData.current_time);
+                        }
                         startPlaybackTracking();
-                    }, 200);
+                    })
+                    .catch(() => {
+                        // Fallback to client position if server check fails
+                        playStartTime = Date.now();
+                        playStartPosition = currentPosition;
+                        startPlaybackTracking();
+                    });
                 }
             })
             .catch(error => {
@@ -620,6 +591,9 @@
                 if (data.success) {
                     isPlaying = true;
                     updatePlayButton();
+                    // Resume from current client position (no server sync needed)
+                    playStartTime = Date.now();
+                    playStartPosition = currentPosition;
                     startPlaybackTracking();
                 }
             })
@@ -659,64 +633,74 @@
         .catch(error => console.error('Error stopping playback:', error));
     }
     
-    function updateMasterDimmer() {
-        const value = document.getElementById('masterDimmer').value;
-        fetch('/api/master-dimmer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ value: parseInt(value) })
-        });
-    }
-    
-    function updateMasterColor() {
-        const color = document.getElementById('masterColor').value;
-        fetch('/api/master-color', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ color: color })
-        });
-    }
-    
-    function blackout() {
-        fetch('/api/blackout', { method: 'POST' });
-    }
     
     function startPlaybackTracking() {
-        stopPlaybackTracking(); // Clear any existing interval
+        stopPlaybackTracking(); // Clear any existing intervals
         console.log('Starting playback tracking');
         
+        // Record the start time for smooth client-side tracking
+        playStartTime = Date.now();
+        playStartPosition = currentPosition;
+        lastUIUpdate = 0;
+        
+        // Start client-side playline updates (30fps for better performance)
         playbackInterval = setInterval(() => {
             if (isPlaying) {
-                fetch('/api/playback-status')
-                .then(response => response.json())
-                .then(data => {
-                    console.log('Playback status:', data);
-                    if (data.is_playing) {
-                        currentPosition = data.current_time || 0;
-                        updatePlayheads(currentPosition);
-                        updatePositionDisplay(currentPosition);
-                        
-                        // Update waveform renderer
-                        if (window.waveformRenderer) {
-                            window.waveformRenderer.setCurrentTime(currentPosition);
-                            window.waveformRenderer.setPlaying(true);
-                        }
-                    } else {
-                        console.log('Backend reports not playing, stopping tracking');
-                        isPlaying = false;
-                        stopPlaybackTracking();
-                        updatePlayButton();
-                    }
-                })
-                .catch(error => {
-                    console.error('Error fetching playback status:', error);
-                    // Don't automatically stop on error, might be temporary
-                });
+                updateClientPosition();
             } else {
-                console.log('Local state shows not playing, stopping tracking');
                 stopPlaybackTracking();
             }
-        }, 250); // Update every 250ms - less frequent to reduce conflicts
+        }, 33); // ~30fps for better performance while maintaining smoothness
+        
+        // No server polling during playback - client-side only for smooth movement
+    }
+    
+    function updateClientPosition() {
+        if (!isPlaying) return;
+        
+        // Calculate current position based on elapsed time since play started
+        const elapsedMs = Date.now() - playStartTime;
+        const elapsedSeconds = elapsedMs / 1000;
+        currentPosition = playStartPosition + elapsedSeconds;
+        
+        // Stop if we've reached the end
+        if (currentSong && currentPosition >= currentSong.duration) {
+            currentPosition = currentSong.duration;
+            isPlaying = false;
+            stopPlaybackTracking();
+            updatePlayButton();
+            return;
+        }
+        
+        // Throttle UI updates to reduce load (max 20fps for UI updates)
+        const now = Date.now();
+        if (now - lastUIUpdate < 50) {
+            return; // Skip this update cycle
+        }
+        lastUIUpdate = now;
+        
+        // Update UI elements
+        updatePlayheads(currentPosition);
+        updatePositionDisplay(currentPosition);
+        
+        // Update waveform renderer
+        if (window.waveformRenderer) {
+            window.waveformRenderer.setCurrentTime(currentPosition);
+            window.waveformRenderer.setPlaying(true);
+        }
+        
+        // Update sequence editor
+        if (window.sequenceEditor) {
+            window.sequenceEditor.setCurrentTime(currentPosition);
+        }
+    }
+    
+    function syncWithServerPosition(serverPosition) {
+        currentPosition = serverPosition;
+        playStartTime = Date.now();
+        playStartPosition = serverPosition;
+        
+        console.log('Synced client position to server:', serverPosition);
     }
     
     function stopPlaybackTracking() {
@@ -734,22 +718,9 @@
     function updatePlayheads(time) {
         if (!currentSong || currentSong.duration === 0) return;
         
-        // Calculate position as percentage
-        const percentage = (time / currentSong.duration) * 100;
-        
-        // Update waveform playhead
-        const waveformPlayhead = document.getElementById('waveformPlayhead');
-        if (waveformPlayhead && window.waveformRenderer) {
-            const pixelPosition = window.waveformRenderer.timeToPixel(time);
-            waveformPlayhead.style.left = pixelPosition + 'px';
-        }
-        
-        // Update sequence playhead
-        const sequencePlayhead = document.getElementById('sequencePlayhead');
-        if (sequencePlayhead && window.sequenceEditor) {
-            const pixelPosition = window.sequenceEditor.timeToPixel(time);
-            sequencePlayhead.style.left = pixelPosition + 'px';
-        }
+        // The individual components (waveformRenderer and sequenceEditor) 
+        // now handle their own playheads via setCurrentTime()
+        // This function is kept for backward compatibility but may be removed later
     }
     
     function updatePositionDisplay(time) {

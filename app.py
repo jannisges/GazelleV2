@@ -1282,7 +1282,7 @@ def playback_status():
                 'is_playing': True,
                 'current_sequence': {
                     'id': current_sequence.id,
-                    'name': current_sequence.name,
+                    'name': getattr(current_sequence, 'name', 'Temporary Sequence'),
                     'song_name': current_sequence.song.name
                 },
                 'current_time': position,

@@ -145,9 +145,16 @@ class WaveformRenderer {
     }
     
     startPlaybackAnimation() {
+        // Throttle waveform animation to reduce CPU usage
+        let lastRender = 0;
         const animate = () => {
             if (this.isPlaying) {
-                this.render();
+                const now = performance.now();
+                // Only render at ~20fps to reduce load
+                if (now - lastRender >= 50) {
+                    this.render();
+                    lastRender = now;
+                }
                 requestAnimationFrame(animate);
             }
         };

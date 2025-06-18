@@ -269,7 +269,7 @@ class LightPreview {
         // Periodically fetch DMX data from server
         setInterval(() => {
             this.fetchDMXData();
-        }, 100); // 10 FPS
+        }, 200); // 5 FPS - reduced frequency to improve performance
     }
     
     fetchDMXData() {
