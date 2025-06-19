@@ -28,6 +28,7 @@ body {
     background-color: #f8f9fa;
     border: 1px solid #dee2e6;
     border-radius: 5px;
+    position: relative;
 }
 
 .dmx-address {
@@ -43,6 +44,28 @@ body {
     cursor: pointer;
     transition: all 0.2s ease;
     position: relative;
+}
+
+/* Device Name Labels that look like DMX address boxes */
+.device-name-label {
+    width: 40px;
+    height: 40px;
+    border: 1px solid #0056b3;
+    background-color: rgba(0, 123, 255, 0.9);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: bold;
+    transition: all 0.2s ease;
+    position: absolute;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    padding: 2px;
+    box-sizing: border-box;
 }
 
 .dmx-address:hover {
@@ -69,6 +92,7 @@ body {
     background-color: #28a745;
     border-color: #1e7e34;
 }
+
 
 /* Device Library */
 .device-library {
@@ -383,6 +407,13 @@ body {
         font-size: 9px;
     }
     
+    .device-name-label {
+        width: 35px;
+        height: 35px;
+        font-size: 7px;
+        padding: 1px;
+    }
+    
     .plan-view {
         height: 300px;
     }
@@ -528,6 +559,12 @@ body {
 [data-bs-theme="dark"] .dmx-address:hover {
     background-color: #333;
     border-color: #0d6efd;
+}
+
+[data-bs-theme="dark"] .device-name-label {
+    background-color: rgba(13, 110, 253, 0.9);
+    border-color: #0d6efd;
+    color: #ffffff;
 }
 
 [data-bs-theme="dark"] .device-library {

@@ -133,8 +133,10 @@ function handleDrop(e) {
     if (isDragging && dragElement) {
         const target = e.target.closest('.dmx-address');
         if (target) {
-            const deviceId = dragElement.dataset.deviceId;
+            const deviceId = parseInt(dragElement.dataset.deviceId);
             const address = parseInt(target.dataset.address);
+            
+            console.log(`Dropping device ${deviceId} on address ${address}`);
             
             // Patch device to DMX address
             patchDevice(deviceId, address);
@@ -155,41 +157,55 @@ function handleDragEnd(e) {
     dragElement = null;
 }
 
-// Device patching functions
+// Device patching functions - Updated to work with PatchManager
 function patchDevice(deviceId, startAddress) {
-    apiCall('/api/patch-device', 'POST', {
-        device_id: deviceId,
-        start_address: startAddress
-    })
-    .then(response => {
-        if (response.success) {
-            updatePatchDisplay();
-            showNotification('Device patched successfully', 'success');
-        } else {
-            showNotification('Error patching device: ' + response.error, 'error');
-        }
-    })
-    .catch(error => {
-        console.error('Error patching device:', error);
-        showNotification('Error patching device', 'error');
-    });
-}
-
-function unpatchDevice(patchId) {
-    if (confirm('Are you sure you want to unpatch this device?')) {
-        apiCall('/api/unpatch-device', 'POST', { patch_id: patchId })
+    // Use PatchManager if available, otherwise fallback to direct API call
+    if (window.patchManager && typeof window.patchManager.patchDevice === 'function') {
+        window.patchManager.patchDevice(deviceId, startAddress);
+    } else {
+        // Fallback to direct API call
+        apiCall('/api/patch-device', 'POST', {
+            device_id: parseInt(deviceId),
+            start_address: startAddress
+        })
         .then(response => {
             if (response.success) {
-                updatePatchDisplay();
-                showNotification('Device unpatched successfully', 'success');
+                showNotification('Device patched successfully', 'success');
+                // Reload page as fallback
+                setTimeout(() => location.reload(), 500);
             } else {
-                showNotification('Error unpatching device: ' + response.error, 'error');
+                showNotification('Error patching device: ' + response.error, 'error');
             }
         })
         .catch(error => {
-            console.error('Error unpatching device:', error);
-            showNotification('Error unpatching device', 'error');
+            console.error('Error patching device:', error);
+            showNotification('Error patching device', 'error');
         });
+    }
+}
+
+function unpatchDevice(patchId) {
+    // Use PatchManager if available, otherwise fallback to direct API call
+    if (window.patchManager && typeof window.patchManager.unpatchDevice === 'function') {
+        window.patchManager.unpatchDevice(patchId);
+    } else {
+        // Fallback implementation
+        if (confirm('Are you sure you want to unpatch this device?')) {
+            apiCall('/api/unpatch-device', 'POST', { patch_id: patchId })
+            .then(response => {
+                if (response.success) {
+                    showNotification('Device unpatched successfully', 'success');
+                    // Reload page as fallback
+                    setTimeout(() => location.reload(), 500);
+                } else {
+                    showNotification('Error unpatching device: ' + response.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error unpatching device:', error);
+                showNotification('Error unpatching device', 'error');
+            });
+        }
     }
 }
 
