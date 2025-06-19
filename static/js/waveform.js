@@ -13,6 +13,7 @@ class WaveformRenderer {
         this.currentTime = 0;
         
         this.setupCanvas();
+        this.setupPlayheadOverlay();
         this.setupEventListeners();
     }
     
@@ -34,6 +35,7 @@ class WaveformRenderer {
             this.canvas.height = newRect.height || 200;
             this.canvas.style.width = this.canvas.width + 'px';
             this.canvas.style.height = this.canvas.height + 'px';
+            this.syncOverlaySize();
             this.render();
         };
         
@@ -41,9 +43,51 @@ class WaveformRenderer {
         window.addEventListener('resize', this.canvas.resizeHandler);
     }
     
+    setupPlayheadOverlay() {
+        // Create overlay canvas for playhead
+        this.playheadOverlay = document.createElement('canvas');
+        this.playheadOverlay.style.position = 'absolute';
+        this.playheadOverlay.style.top = '0';
+        this.playheadOverlay.style.left = '0';
+        this.playheadOverlay.style.pointerEvents = 'none';
+        this.playheadOverlay.style.zIndex = '10';
+        
+        // Insert overlay after main canvas
+        this.canvas.parentElement.appendChild(this.playheadOverlay);
+        this.playheadCtx = this.playheadOverlay.getContext('2d');
+        
+        // Sync overlay size with main canvas
+        this.syncOverlaySize();
+        
+        // Store resize handler for overlay
+        this.playheadOverlay.resizeHandler = () => {
+            this.syncOverlaySize();
+        };
+        
+        // Add resize listener for overlay
+        window.addEventListener('resize', this.playheadOverlay.resizeHandler);
+    }
+    
+    syncOverlaySize() {
+        this.playheadOverlay.width = this.canvas.width;
+        this.playheadOverlay.height = this.canvas.height;
+        this.playheadOverlay.style.width = this.canvas.style.width;
+        this.playheadOverlay.style.height = this.canvas.style.height;
+    }
+    
     setupEventListeners() {
-        // Click to seek
+        // Track dragging state to prevent click after drag
+        let isDragging = false;
+        let lastX = 0;
+        let hasDragged = false;
+        
+        // Click to seek (only if not dragging)
         this.canvas.addEventListener('click', (e) => {
+            if (hasDragged) {
+                hasDragged = false; // Reset flag
+                return; // Don't seek if we just finished dragging
+            }
+            
             const rect = this.canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const time = this.pixelToTime(x);
@@ -62,19 +106,18 @@ class WaveformRenderer {
             // Adjust scroll position to zoom toward mouse position
             if (newZoomLevel !== this.zoomLevel) {
                 const zoomChange = newZoomLevel / this.zoomLevel;
-                this.scrollPosition = Math.max(0, Math.min(1 - 1/newZoomLevel, 
+                const newScrollPosition = Math.max(0, Math.min(1 - 1/newZoomLevel, 
                     this.scrollPosition + mouseX * (1 - 1/zoomChange) / newZoomLevel));
+                this.scrollPosition = newScrollPosition;
                 this.setZoomLevel(newZoomLevel);
             }
         });
         
         // Drag to scroll when zoomed
-        let isDragging = false;
-        let lastX = 0;
-        
         this.canvas.addEventListener('mousedown', (e) => {
             if (this.zoomLevel > 1) {
                 isDragging = true;
+                hasDragged = false; // Reset drag flag
                 lastX = e.clientX;
                 this.canvas.style.cursor = 'grabbing';
             }
@@ -84,10 +127,21 @@ class WaveformRenderer {
             if (isDragging) {
                 const deltaX = e.clientX - lastX;
                 const scrollDelta = -(deltaX / this.canvas.width) * (1 / this.zoomLevel);
-                this.scrollPosition = Math.max(0, Math.min(1 - 1/this.zoomLevel, 
+                const newScrollPosition = Math.max(0, Math.min(1 - 1/this.zoomLevel, 
                     this.scrollPosition + scrollDelta));
-                lastX = e.clientX;
-                this.render();
+                
+                if (newScrollPosition !== this.scrollPosition) {
+                    this.scrollPosition = newScrollPosition;
+                    lastX = e.clientX;
+                    hasDragged = true; // Mark that we've dragged
+                    this.render();
+                    
+                    // Dispatch scroll change event for synchronization
+                    const event = new CustomEvent('waveform-scroll-change', { 
+                        detail: { zoomLevel: this.zoomLevel, scrollPosition: this.scrollPosition } 
+                    });
+                    this.canvas.dispatchEvent(event);
+                }
             }
         });
         
@@ -127,14 +181,31 @@ class WaveformRenderer {
     }
     
     setZoomLevel(zoomLevel) {
+        const newZoom = Math.max(1, Math.min(100, zoomLevel));
+        if (newZoom !== this.zoomLevel) {
+            this.zoomLevel = newZoom;
+            this.render();
+            this.updateMarkers();
+            
+            // Dispatch zoom change event for synchronization
+            const event = new CustomEvent('waveform-zoom-change', { 
+                detail: { zoomLevel: this.zoomLevel, scrollPosition: this.scrollPosition } 
+            });
+            this.canvas.dispatchEvent(event);
+        }
+    }
+    
+    syncFromExternal(zoomLevel, scrollPosition) {
+        // Update zoom and scroll without triggering events (to avoid infinite loops)
         this.zoomLevel = Math.max(1, Math.min(100, zoomLevel));
+        this.scrollPosition = Math.max(0, Math.min(1 - 1/this.zoomLevel, scrollPosition));
         this.render();
         this.updateMarkers();
     }
     
     setCurrentTime(time) {
         this.currentTime = time;
-        this.render();
+        this.updatePlayhead();
     }
     
     setPlaying(isPlaying) {
@@ -145,14 +216,14 @@ class WaveformRenderer {
     }
     
     startPlaybackAnimation() {
-        // Throttle waveform animation to reduce CPU usage
+        // Throttle playhead animation to reduce CPU usage
         let lastRender = 0;
         const animate = () => {
             if (this.isPlaying) {
                 const now = performance.now();
-                // Only render at ~20fps to reduce load
-                if (now - lastRender >= 50) {
-                    this.render();
+                // Only render playhead at ~60fps since it's now lightweight
+                if (now - lastRender >= 16) {
+                    this.updatePlayhead();
                     lastRender = now;
                 }
                 requestAnimationFrame(animate);
@@ -177,10 +248,8 @@ class WaveformRenderer {
         // Draw waveform
         this.drawWaveform();
         
-        // Draw playhead
-        if (this.currentTime > 0) {
-            this.drawPlayhead();
-        }
+        // Update playhead overlay
+        this.updatePlayhead();
     }
     
     drawPlaceholder() {
@@ -451,20 +520,26 @@ class WaveformRenderer {
         });
     }
     
-    drawPlayhead() {
-        const ctx = this.ctx;
-        const width = this.canvas.width;
-        const height = this.canvas.height;
+    updatePlayhead() {
+        if (!this.playheadCtx) return;
         
-        const x = this.timeToPixel(this.currentTime);
+        // Clear entire overlay
+        this.playheadCtx.clearRect(0, 0, this.playheadOverlay.width, this.playheadOverlay.height);
         
-        if (x >= 0 && x <= width) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#dc3545';
-            ctx.lineWidth = 2;
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, height);
-            ctx.stroke();
+        // Draw playhead if we have a current time
+        if (this.currentTime > 0) {
+            const x = this.timeToPixel(this.currentTime);
+            const width = this.playheadOverlay.width;
+            const height = this.playheadOverlay.height;
+            
+            if (x >= 0 && x <= width) {
+                this.playheadCtx.beginPath();
+                this.playheadCtx.strokeStyle = '#dc3545';
+                this.playheadCtx.lineWidth = 2;
+                this.playheadCtx.moveTo(x, 0);
+                this.playheadCtx.lineTo(x, height);
+                this.playheadCtx.stroke();
+            }
         }
     }
     
@@ -556,6 +631,9 @@ class WaveformRenderer {
 function initializeWaveform() {
     if (document.getElementById('waveformCanvas')) {
         window.waveformRenderer = new WaveformRenderer('waveformCanvas', 'waveformMarkers');
+        
+        // Set up synchronization with sequence editor
+        setupTimelineSync();
     }
 }
 
@@ -571,5 +649,46 @@ function renderWaveform(waveformData, duration = null) {
 function updateTimeline() {
     if (window.waveformRenderer) {
         window.waveformRenderer.updateMarkers();
+    }
+}
+
+// Set up synchronization between waveform and sequence editor
+function setupTimelineSync() {
+    if (!window.waveformRenderer || !window.sequenceEditor) return;
+    
+    // Listen for waveform changes and sync to sequence editor
+    document.getElementById('waveformCanvas').addEventListener('waveform-zoom-change', (e) => {
+        if (window.sequenceEditor) {
+            window.sequenceEditor.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
+        }
+    });
+    
+    document.getElementById('waveformCanvas').addEventListener('waveform-scroll-change', (e) => {
+        if (window.sequenceEditor) {
+            window.sequenceEditor.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
+        }
+    });
+    
+    // Listen for sequence editor changes and sync to waveform
+    document.getElementById('sequenceContainer').addEventListener('sequence-zoom-change', (e) => {
+        if (window.waveformRenderer) {
+            window.waveformRenderer.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
+        }
+    });
+    
+    document.getElementById('sequenceContainer').addEventListener('sequence-scroll-change', (e) => {
+        if (window.waveformRenderer) {
+            window.waveformRenderer.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
+        }
+    });
+}
+
+// Update playhead on both timelines simultaneously
+function updateSynchronizedPlayhead(time) {
+    if (window.waveformRenderer) {
+        window.waveformRenderer.setCurrentTime(time);
+    }
+    if (window.sequenceEditor) {
+        window.sequenceEditor.setCurrentTime(time);
     }
 }

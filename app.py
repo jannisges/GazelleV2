@@ -240,6 +240,32 @@ class AudioPlayer:
         self.total_pause_duration = 0
         self.seek_offset = 0
     
+    def seek(self, position):
+        """Seek to a specific position during playback"""
+        if self.current_song:
+            was_playing = self.is_playing
+            if was_playing:
+                # Stop current playback
+                pygame.mixer.music.stop()
+                # Restart from new position
+                try:
+                    pygame.mixer.music.play(start=position)
+                    self.is_playing = True
+                    self.start_time = time.time()
+                    self.total_pause_duration = 0
+                    self.seek_offset = position
+                    return True
+                except Exception as e:
+                    print(f"Error seeking: {e}")
+                    # If seeking fails, try to resume from current position
+                    self.play(self.seek_offset)
+                    return False
+            else:
+                # Not playing, just update the seek offset for next play
+                self.seek_offset = position
+                return True
+        return False
+    
     def get_position(self):
         if self.is_playing and self.start_time:
             # Calculate actual position accounting for pauses and seeking
@@ -1335,6 +1361,26 @@ def stop_sequence():
             dmx_controller.set_channel(i + 1, 0)
         
         return jsonify({'success': True})
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/seek-sequence', methods=['POST'])
+def seek_sequence():
+    try:
+        data = request.get_json()
+        position = data.get('position', 0)
+        
+        if not current_sequence:
+            return jsonify({'error': 'No sequence currently loaded'}), 400
+        
+        # Use the seek functionality in AudioPlayer
+        success = audio_player.seek(position)
+        
+        if success:
+            return jsonify({'success': True, 'position': position})
+        else:
+            return jsonify({'error': 'Seek operation failed'}), 500
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500

@@ -151,7 +151,6 @@
                 <div class="waveform-container" id="waveformContainer">
                     <canvas id="waveformCanvas" width="800" height="200"></canvas>
                     <div class="timeline-markers" id="waveformMarkers"></div>
-                    <div class="playhead" id="waveformPlayhead" style="left: 0;"></div>
                 </div>
                 
                 <!-- Sequence Editor -->
@@ -168,9 +167,7 @@
                 </div>
                 
                 <div class="sequence-container" id="sequenceContainer">
-                    <div id="sequenceTracks"></div>
                     <div class="timeline-markers" id="sequenceMarkers"></div>
-                    <div class="playhead" id="sequencePlayhead" style="left: 0;"></div>
                 </div>
                 
                 <!-- Playback Controls -->
@@ -294,28 +291,37 @@
         updatePlayheads(currentPosition);
         updatePositionDisplay(currentPosition);
         
-        // Update waveform renderer
-        if (window.waveformRenderer) {
-            window.waveformRenderer.setCurrentTime(currentPosition);
+        // Update synchronized playheads
+        if (window.updateSynchronizedPlayhead) {
+            window.updateSynchronizedPlayhead(currentPosition);
         }
         
-        // Update sequence editor
-        if (window.sequenceEditor) {
-            window.sequenceEditor.setCurrentTime(currentPosition);
-        }
-        
-        // If playing, stop first, then the next play will start from the new position
+        // If playing, seek without stopping playback
         if (isPlaying) {
-            console.log('Stopping for seek');
-            isPlaying = false;
-            stopPlaybackTracking();
-            updatePlayButton();
+            console.log('Seeking during playback to position:', time);
             
-            fetch('/api/stop-sequence', { method: 'POST' })
-            .then(() => {
-                console.log('Stopped for seek, ready to play from new position');
+            // Send seek request to backend
+            fetch('/api/seek-sequence', { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ position: currentPosition })
             })
-            .catch(error => console.error('Error stopping for seek:', error));
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Seeked successfully during playback');
+                    // Reset tracking to sync with new position
+                    playStartTime = Date.now();
+                    playStartPosition = currentPosition;
+                } else {
+                    console.error('Seek failed:', data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error seeking during playback:', error);
+            });
         }
     }
     
@@ -403,10 +409,8 @@
     
     function toggleSequenceExpanded() {
         isExpanded = !isExpanded;
-        const container = document.getElementById('sequenceContainer');
-        container.classList.toggle('sequence-expanded', isExpanded);
         if (window.sequenceEditor) {
-            window.sequenceEditor.render();
+            window.sequenceEditor.setExpanded(isExpanded);
         }
     }
     
@@ -683,15 +687,14 @@
         updatePlayheads(currentPosition);
         updatePositionDisplay(currentPosition);
         
-        // Update waveform renderer
-        if (window.waveformRenderer) {
-            window.waveformRenderer.setCurrentTime(currentPosition);
-            window.waveformRenderer.setPlaying(true);
+        // Update synchronized playheads
+        if (window.updateSynchronizedPlayhead) {
+            window.updateSynchronizedPlayhead(currentPosition);
         }
         
-        // Update sequence editor
-        if (window.sequenceEditor) {
-            window.sequenceEditor.setCurrentTime(currentPosition);
+        // Set playing state for waveform renderer
+        if (window.waveformRenderer) {
+            window.waveformRenderer.setPlaying(true);
         }
     }
     

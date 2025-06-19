@@ -11,8 +11,34 @@ class SequenceEditor {
         this.selectedEvent = null;
         this.isExpanded = false;
         this.tracks = [];
+        this.currentTime = 0;
         
+        this.setupPlayheadOverlay();
         this.setupEventListeners();
+    }
+    
+    setupPlayheadOverlay() {
+        // Create overlay div for playhead (since sequence editor uses div not canvas)
+        this.playheadOverlay = document.createElement('div');
+        this.playheadOverlay.style.position = 'absolute';
+        this.playheadOverlay.style.top = '0';
+        this.playheadOverlay.style.left = '0';
+        this.playheadOverlay.style.width = '100%';
+        this.playheadOverlay.style.height = '100%';
+        this.playheadOverlay.style.pointerEvents = 'none';
+        this.playheadOverlay.style.zIndex = '10';
+        
+        // Create the actual playhead line
+        this.playheadLine = document.createElement('div');
+        this.playheadLine.style.position = 'absolute';
+        this.playheadLine.style.width = '2px';
+        this.playheadLine.style.height = '100%';
+        this.playheadLine.style.backgroundColor = '#dc3545';
+        this.playheadLine.style.display = 'none';
+        this.playheadLine.style.top = '0';
+        
+        this.playheadOverlay.appendChild(this.playheadLine);
+        this.container.appendChild(this.playheadOverlay);
     }
     
     setupEventListeners() {
@@ -38,6 +64,70 @@ class SequenceEditor {
                 this.editEvent(e.target);
             }
         });
+        
+        // Mouse wheel for zoom
+        this.container.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const rect = this.container.getBoundingClientRect();
+            const mouseX = (e.clientX - rect.left) / rect.width;
+            
+            const zoomFactor = e.deltaY > 0 ? 0.8 : 1.25;
+            const newZoomLevel = Math.max(1, Math.min(100, this.zoomLevel * zoomFactor));
+            
+            // Adjust scroll position to zoom toward mouse position
+            if (newZoomLevel !== this.zoomLevel) {
+                const zoomChange = newZoomLevel / this.zoomLevel;
+                const newScrollPosition = Math.max(0, Math.min(1 - 1/newZoomLevel, 
+                    this.scrollPosition + mouseX * (1 - 1/zoomChange) / newZoomLevel));
+                this.scrollPosition = newScrollPosition;
+                this.setZoomLevel(newZoomLevel);
+            }
+        });
+        
+        // Drag to scroll when zoomed
+        let isDragging = false;
+        let lastX = 0;
+        
+        this.container.addEventListener('mousedown', (e) => {
+            if (this.zoomLevel > 1 && !e.target.classList.contains('sequence-event')) {
+                isDragging = true;
+                lastX = e.clientX;
+                this.container.style.cursor = 'grabbing';
+            }
+        });
+        
+        this.container.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const deltaX = e.clientX - lastX;
+                const scrollDelta = -(deltaX / this.container.clientWidth) * (1 / this.zoomLevel);
+                const newScrollPosition = Math.max(0, Math.min(1 - 1/this.zoomLevel, 
+                    this.scrollPosition + scrollDelta));
+                
+                if (newScrollPosition !== this.scrollPosition) {
+                    this.scrollPosition = newScrollPosition;
+                    lastX = e.clientX;
+                    this.render();
+                    this.updateMarkers();
+                    this.updatePlayhead();
+                    
+                    // Dispatch scroll change event for synchronization
+                    const event = new CustomEvent('sequence-scroll-change', { 
+                        detail: { zoomLevel: this.zoomLevel, scrollPosition: this.scrollPosition } 
+                    });
+                    this.container.dispatchEvent(event);
+                }
+            }
+        });
+        
+        this.container.addEventListener('mouseup', () => {
+            isDragging = false;
+            this.container.style.cursor = 'default';
+        });
+        
+        this.container.addEventListener('mouseleave', () => {
+            isDragging = false;
+            this.container.style.cursor = 'default';
+        });
     }
     
     loadSequence(events, duration) {
@@ -48,9 +138,44 @@ class SequenceEditor {
     }
     
     setZoomLevel(zoomLevel) {
+        const newZoom = Math.max(1, Math.min(100, zoomLevel));
+        if (newZoom !== this.zoomLevel) {
+            this.zoomLevel = newZoom;
+            this.render();
+            this.updateMarkers();
+            this.updatePlayhead();
+            
+            // Dispatch zoom change event for synchronization
+            const event = new CustomEvent('sequence-zoom-change', { 
+                detail: { zoomLevel: this.zoomLevel, scrollPosition: this.scrollPosition } 
+            });
+            this.container.dispatchEvent(event);
+        }
+    }
+    
+    setScrollPosition(scrollPosition) {
+        const newScroll = Math.max(0, Math.min(1 - 1/this.zoomLevel, scrollPosition));
+        if (newScroll !== this.scrollPosition) {
+            this.scrollPosition = newScroll;
+            this.render();
+            this.updateMarkers();
+            this.updatePlayhead();
+            
+            // Dispatch scroll change event for synchronization
+            const event = new CustomEvent('sequence-scroll-change', { 
+                detail: { zoomLevel: this.zoomLevel, scrollPosition: this.scrollPosition } 
+            });
+            this.container.dispatchEvent(event);
+        }
+    }
+    
+    syncFromExternal(zoomLevel, scrollPosition) {
+        // Update zoom and scroll without triggering events (to avoid infinite loops)
         this.zoomLevel = Math.max(1, Math.min(100, zoomLevel));
+        this.scrollPosition = Math.max(0, Math.min(1 - 1/this.zoomLevel, scrollPosition));
         this.render();
         this.updateMarkers();
+        this.updatePlayhead();
     }
     
     setExpanded(expanded) {
@@ -66,11 +191,25 @@ class SequenceEditor {
     
     setCurrentTime(time) {
         this.currentTime = time;
-        // Update playhead position if it exists
-        const playhead = document.getElementById('sequencePlayhead');
-        if (playhead) {
-            const pixelPosition = this.timeToPixel(time);
-            playhead.style.left = pixelPosition + 'px';
+        this.updatePlayhead();
+    }
+    
+    updatePlayhead() {
+        if (!this.playheadLine) return;
+        
+        // Show/hide playhead based on current time
+        if (this.currentTime > 0) {
+            const x = this.timeToPixel(this.currentTime);
+            const containerWidth = this.container.clientWidth;
+            
+            if (x >= 0 && x <= containerWidth) {
+                this.playheadLine.style.display = 'block';
+                this.playheadLine.style.left = x + 'px';
+            } else {
+                this.playheadLine.style.display = 'none';
+            }
+        } else {
+            this.playheadLine.style.display = 'none';
         }
     }
     
@@ -110,6 +249,13 @@ class SequenceEditor {
     }
     
     render() {
+        // Preserve the playhead overlay during render
+        const playheadOverlay = this.playheadOverlay;
+        if (playheadOverlay && playheadOverlay.parentNode === this.container) {
+            this.container.removeChild(playheadOverlay);
+        }
+        
+        // Clear container
         this.container.innerHTML = '';
         
         if (this.isExpanded) {
@@ -119,6 +265,11 @@ class SequenceEditor {
         }
         
         this.renderEvents();
+        
+        // Re-add the playhead overlay
+        if (playheadOverlay) {
+            this.container.appendChild(playheadOverlay);
+        }
     }
     
     renderExpandedTracks() {
@@ -162,8 +313,11 @@ class SequenceEditor {
         track.style.top = '0px';
         this.container.appendChild(track);
         
-        // Set container height
-        this.container.style.height = '30px';
+        // Only set container height if not already set by CSS
+        if (!this.container.style.height || this.container.style.height === '30px') {
+            // Preserve the original CSS height for collapsed view
+            this.container.style.height = '';
+        }
     }
     
     renderEvents() {
@@ -455,6 +609,11 @@ function initializeSequenceEditor() {
         document.getElementById('sequenceContainer').addEventListener('sequence-change', (e) => {
             currentSequence.events = e.detail.events;
         });
+        
+        // Set up synchronization with waveform (if it exists)
+        if (window.setupTimelineSync) {
+            window.setupTimelineSync();
+        }
     }
 }
 
