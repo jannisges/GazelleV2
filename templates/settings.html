@@ -206,6 +206,15 @@
                 </div>
             </div>
             
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="darkMode">
+                    <label class="form-check-label" for="darkMode">
+                        Enable dark mode
+                    </label>
+                </div>
+            </div>
+            
             <button class="btn btn-primary" onclick="saveSystemSettings()">
                 <i class="bi bi-save"></i> Save System Settings
             </button>
@@ -325,6 +334,7 @@
         loadNetworkStatus();
         loadSystemSettings();
         setupNetworkModeToggle();
+        setupDarkModeToggle();
         
         // Refresh network status every 10 seconds
         setInterval(loadNetworkStatus, 10000);
@@ -342,6 +352,28 @@
                 }
             });
         });
+    }
+    
+    function setupDarkModeToggle() {
+        const darkModeCheckbox = document.getElementById('darkMode');
+        darkModeCheckbox.addEventListener('change', function() {
+            toggleTheme(this.checked);
+        });
+    }
+    
+    function toggleTheme(isDark) {
+        if (isDark) {
+            document.documentElement.setAttribute('data-bs-theme', 'dark');
+            localStorage.setItem('theme', 'dark');
+        } else {
+            document.documentElement.setAttribute('data-bs-theme', 'light');
+            localStorage.setItem('theme', 'light');
+        }
+        
+        // Refresh waveform display if it exists
+        if (window.waveformRenderer) {
+            window.waveformRenderer.refreshTheme();
+        }
     }
     
     function loadStorageInfo() {
@@ -613,6 +645,7 @@
                 document.getElementById('timezone').value = settings.timezone || 'UTC';
                 document.getElementById('autoStart').checked = settings.auto_start !== false;
                 document.getElementById('enableLogging').checked = settings.enable_logging !== false;
+                document.getElementById('darkMode').checked = settings.dark_mode === true;
             }
         })
         .catch(error => {
@@ -625,7 +658,8 @@
             system_name: document.getElementById('systemName').value,
             timezone: document.getElementById('timezone').value,
             auto_start: document.getElementById('autoStart').checked,
-            enable_logging: document.getElementById('enableLogging').checked
+            enable_logging: document.getElementById('enableLogging').checked,
+            dark_mode: document.getElementById('darkMode').checked
         };
         
         DMXUtils.apiCall('/api/save-system-settings', 'POST', settings)

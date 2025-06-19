@@ -425,6 +425,27 @@ def manage_sequences():
 def settings():
     return render_template('settings.html')
 
+@app.route('/api/get-dark-mode')
+def get_dark_mode():
+    try:
+        config_dir = os.path.expanduser('~/.dmx_control')
+        config_file = os.path.join(config_dir, 'system.json')
+        
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                settings = json.load(f)
+                return jsonify({
+                    'success': True,
+                    'dark_mode': settings.get('dark_mode', False)
+                })
+        else:
+            return jsonify({
+                'success': True,
+                'dark_mode': False
+            })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # API Routes
 @app.route('/api/upload-song', methods=['POST'])
 def upload_song():
@@ -1898,7 +1919,8 @@ def system_settings():
             'audio_buffer_size': 1024,
             'max_sequences': 100,
             'backup_enabled': True,
-            'debug_mode': False
+            'debug_mode': False,
+            'dark_mode': False
         }
         
         if os.path.exists(config_file):
@@ -1913,7 +1935,7 @@ def system_settings():
         
         return jsonify({
             'success': True,
-            'data': settings
+            'settings': settings
         })
         
     except Exception as e:
@@ -1936,6 +1958,7 @@ def save_system_settings():
             'max_sequences': data.get('max_sequences', 100),
             'backup_enabled': data.get('backup_enabled', True),
             'debug_mode': data.get('debug_mode', False),
+            'dark_mode': data.get('dark_mode', False),
             'updated_at': datetime.now().isoformat()
         }
         

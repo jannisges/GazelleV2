@@ -96,14 +96,6 @@
         margin: 10px 0;
     }
     
-    .zoom-controls {
-        margin: 10px 0;
-    }
-    
-    .zoom-slider {
-        width: 100%;
-        margin: 5px 0;
-    }
     
     .sequence-expanded {
         height: auto;
@@ -137,15 +129,6 @@
                     <small id="songDuration" class="text-muted">Duration: 0:00</small>
                 </div>
                 
-                <!-- Zoom Controls -->
-                <div class="zoom-controls">
-                    <label for="zoomSlider" class="form-label">Zoom Level:</label>
-                    <input type="range" class="form-range zoom-slider" id="zoomSlider" min="1" max="100" value="1" onchange="updateZoom()">
-                    <div class="d-flex justify-content-between">
-                        <small>1x</small>
-                        <small>100x</small>
-                    </div>
-                </div>
                 
                 <!-- Waveform Display -->
                 <div class="waveform-container" id="waveformContainer">
@@ -249,7 +232,6 @@
 <script>
     let currentSong = null;
     let currentSequence = { events: [] };
-    let zoomLevel = 1;
     let isExpanded = false;
     let patchedDevices = [];
     let isPlaying = false;
@@ -398,14 +380,6 @@
         return `${minutes}:${secs.toString().padStart(2, '0')}`;
     }
     
-    function updateZoom() {
-        zoomLevel = parseInt(document.getElementById('zoomSlider').value);
-        if (window.waveformRenderer) {
-            window.waveformRenderer.setZoomLevel(zoomLevel);
-        }
-        updateTimeline();
-        renderSequence();
-    }
     
     function toggleSequenceExpanded() {
         isExpanded = !isExpanded;

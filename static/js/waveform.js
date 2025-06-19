@@ -15,6 +15,9 @@ class WaveformRenderer {
         this.setupCanvas();
         this.setupPlayheadOverlay();
         this.setupEventListeners();
+        
+        // Show placeholder initially
+        this.render();
     }
     
     setupCanvas() {
@@ -240,7 +243,8 @@ class WaveformRenderer {
         // Clear canvas
         ctx.clearRect(0, 0, width, height);
         
-        if (this.waveformData.length === 0) {
+        if (!this.waveformData || (Array.isArray(this.waveformData) && this.waveformData.length === 0) || 
+            (typeof this.waveformData === 'object' && (!this.waveformData.amplitude || this.waveformData.amplitude.length === 0))) {
             this.drawPlaceholder();
             return;
         }
@@ -257,10 +261,15 @@ class WaveformRenderer {
         const width = this.canvas.width;
         const height = this.canvas.height;
         
-        ctx.fillStyle = '#f8f9fa';
+        // Check if dark mode is enabled
+        const isDarkMode = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+        
+        // Background color based on theme
+        ctx.fillStyle = isDarkMode ? '#1a1a1a' : '#f8f9fa';
         ctx.fillRect(0, 0, width, height);
         
-        ctx.fillStyle = '#6c757d';
+        // Text color based on theme
+        ctx.fillStyle = isDarkMode ? '#adb5bd' : '#6c757d';
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
         ctx.fillText('Load an audio file to see waveform', width / 2, height / 2);
@@ -624,6 +633,11 @@ class WaveformRenderer {
         } else {
             return `${minutes}:${wholeSecs.toString().padStart(2, '0')}`;
         }
+    }
+    
+    // Method to refresh display when theme changes
+    refreshTheme() {
+        this.render();
     }
 }
 

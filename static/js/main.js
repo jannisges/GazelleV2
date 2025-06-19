@@ -301,8 +301,46 @@ function getChannelTypeColor(channelType) {
     return channelTypeColors[channelType] || '#6c757d';
 }
 
+// Theme management
+function initializeTheme() {
+    // Check for saved theme preference or default to light mode
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme) {
+        document.documentElement.setAttribute('data-bs-theme', savedTheme);
+        // Refresh waveform if it exists
+        if (window.waveformRenderer) {
+            window.waveformRenderer.refreshTheme();
+        }
+    } else {
+        // Check server-side setting
+        apiCall('/api/get-dark-mode')
+        .then(response => {
+            if (response.success) {
+                const theme = response.dark_mode ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-bs-theme', theme);
+                localStorage.setItem('theme', theme);
+                // Refresh waveform if it exists
+                if (window.waveformRenderer) {
+                    window.waveformRenderer.refreshTheme();
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading theme setting:', error);
+            // Default to light mode on error
+            document.documentElement.setAttribute('data-bs-theme', 'light');
+            localStorage.setItem('theme', 'light');
+            // Refresh waveform if it exists
+            if (window.waveformRenderer) {
+                window.waveformRenderer.refreshTheme();
+            }
+        });
+    }
+}
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', function() {
+    initializeTheme();
     initializeDragAndDrop();
     
     // Initialize tooltips
