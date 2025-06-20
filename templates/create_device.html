@@ -40,18 +40,43 @@
                             <div class="card-body">
                                 <h6><i class="bi bi-lightbulb"></i> Channel Types</h6>
                                 <div class="row">
-                                    <div class="col-md-6">
+                                    <div class="col-md-4">
                                         <ul class="list-unstyled">
                                             <li><span class="badge" style="background-color: #ffc107">Dimmer</span> Master brightness control</li>
+                                            <li><span class="badge" style="background-color: #ffc107">Dimmer_fine</span> Fine dimmer control</li>
                                             <li><span class="badge" style="background-color: #dc3545">Red</span> Red color channel</li>
                                             <li><span class="badge" style="background-color: #28a745">Green</span> Green color channel</li>
-                                        </ul>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <ul class="list-unstyled">
                                             <li><span class="badge" style="background-color: #007bff">Blue</span> Blue color channel</li>
                                             <li><span class="badge" style="background-color: #f8f9fa; color: #000">White</span> White color channel</li>
-                                            <li><span class="badge" style="background-color: #6c757d">Dummy</span> Unused/reserved channel</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <ul class="list-unstyled">
+                                            <li><span class="badge" style="background-color: #17a2b8">Pan</span> Horizontal movement</li>
+                                            <li><span class="badge" style="background-color: #17a2b8">Pan_fine</span> Fine pan control</li>
+                                            <li><span class="badge" style="background-color: #6f42c1">Tilt</span> Vertical movement</li>
+                                            <li><span class="badge" style="background-color: #6f42c1">Tilt_fine</span> Fine tilt control</li>
+                                            <li><span class="badge" style="background-color: #fd7e14">Gobo1</span> Gobo wheel 1</li>
+                                            <li><span class="badge" style="background-color: #fd7e14">Gobo2</span> Gobo wheel 2</li>
+                                            <li><span class="badge" style="background-color: #fd7e14">Gobo_rotation</span> Gobo rotation</li>
+                                            <li><span class="badge" style="background-color: #fd7e14">Gobo_rotation_fine</span> Fine gobo rotation</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <ul class="list-unstyled">
+                                            <li><span class="badge" style="background-color: #e83e8c">Color_Wheel</span> Color wheel</li>
+                                            <li><span class="badge" style="background-color: #20c997">Strobe</span> Strobe/shutter</li>
+                                            <li><span class="badge" style="background-color: #795548">Prism</span> Prism effect</li>
+                                            <li><span class="badge" style="background-color: #795548">Prisma_rotation</span> Prism rotation</li>
+                                            <li><span class="badge" style="background-color: #9e9e9e">Frost</span> Frost/diffusion</li>
+                                            <li><span class="badge" style="background-color: #607d8b">Zoom</span> Beam</li>
+                                            <li><span class="badge" style="background-color: #607d8b">Zoom_fine</span> Fine zoom control</li>
+                                            <li><span class="badge" style="background-color: #3f51b5">Focus</span> Beam focus</li>
+                                            <li><span class="badge" style="background-color: #3f51b5">Focus_fine</span> Fine focus control</li>
+                                            <li><span class="badge" style="background-color: #9c27b0">Macro</span> Preset macros</li>
+                                            <li><span class="badge" style="background-color: #ff5722">Special_functions</span> Special functions</li>
+                                            <li><span class="badge" style="background-color: #f44336">Reset</span> Function reset</li>
+                                            <li><span class="badge" style="background-color: #6c757d">Dummy</span> Unused/reserved</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -246,10 +271,10 @@
                 { type: 'red_channel', name: 'Red' },
                 { type: 'green_channel', name: 'Green' },
                 { type: 'blue_channel', name: 'Blue' },
-                { type: 'dummy', name: 'Pan' },
-                { type: 'dummy', name: 'Tilt' },
-                { type: 'dummy', name: 'Gobo' },
-                { type: 'dummy', name: 'Strobe' }
+                { type: 'pan', name: 'Pan' },
+                { type: 'tilt', name: 'Tilt' },
+                { type: 'gobo1', name: 'Gobo' },
+                { type: 'strobe', name: 'Strobe' }
             ]
         },
         'dimmer': {
@@ -262,7 +287,7 @@
             name: 'Strobe Light',
             channels: [
                 { type: 'dimmer_channel', name: 'Brightness' },
-                { type: 'dummy', name: 'Strobe Rate' }
+                { type: 'strobe', name: 'Strobe Rate' }
             ]
         }
     };
@@ -292,10 +317,31 @@
             <label>Channel ${channelCount}:</label>
             <select class="form-select" name="channel_${channelCount}_type" onchange="updatePreview()">
                 <option value="dimmer_channel">Dimmer</option>
+                <option value="dimmer_fine">Dimmer_fine</option>
                 <option value="red_channel">Red</option>
                 <option value="green_channel">Green</option>
                 <option value="blue_channel">Blue</option>
                 <option value="white_channel">White</option>
+                <option value="pan">Pan</option>
+                <option value="pan_fine">Pan_fine</option>
+                <option value="tilt">Tilt</option>
+                <option value="tilt_fine">Tilt_fine</option>
+                <option value="gobo1">Gobo1</option>
+                <option value="gobo2">Gobo2</option>
+                <option value="gobo_rotation">Gobo_rotation</option>
+                <option value="gobo_rotation_fine">Gobo_rotation_fine</option>
+                <option value="color_wheel">Color_Wheel</option>
+                <option value="strobe">Strobe</option>
+                <option value="prism">Prism</option>
+                <option value="prisma_rotation">Prisma_rotation</option>
+                <option value="frost">Frost</option>
+                <option value="zoom">Zoom</option>
+                <option value="zoom_fine">Zoom_fine</option>
+                <option value="focus">Focus</option>
+                <option value="focus_fine">Focus_fine</option>
+                <option value="macro">Macro</option>
+                <option value="special_functions">Special_functions</option>
+                <option value="reset">Reset</option>
                 <option value="dummy">Dummy/Other</option>
             </select>
             <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeChannel(${channelCount})">

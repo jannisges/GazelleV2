@@ -91,20 +91,24 @@ def patch_device():
         channel_count = len(channels)
         
         # Check if addresses are available
-        for i in range(channel_count):
-            address = start_address + i
-            if address > 512:
-                return jsonify({'error': 'Address range exceeds DMX universe (512 channels)'}), 400
+        if start_address < 1 or start_address + channel_count - 1 > 512:
+            return jsonify({'error': 'Address range exceeds DMX universe (1-512 channels)'}), 400
+        
+        # Check for overlapping addresses with existing patches
+        existing_patches = PatchedDevice.query.all()
+        for existing in existing_patches:
+            existing_channels = existing.device.get_channels()
+            existing_channel_count = len(existing_channels) if existing_channels else 1
+            existing_start = existing.start_address
+            existing_end = existing_start + existing_channel_count - 1
             
-            # Simple check for overlapping addresses
-            existing_patches = PatchedDevice.query.all()
-            for existing in existing_patches:
-                existing_channels = existing.device.get_channels()
-                existing_channel_count = len(existing_channels)
-                existing_end = existing.start_address + existing_channel_count - 1
-                
-                if existing.start_address <= address <= existing_end:
-                    return jsonify({'error': f'Address {address} is already occupied by {existing.device.name}'}), 400
+            # Check if new device range overlaps with existing device range
+            new_start = start_address
+            new_end = start_address + channel_count - 1
+            
+            # Ranges overlap if: new_start <= existing_end AND new_end >= existing_start
+            if new_start <= existing_end and new_end >= existing_start:
+                return jsonify({'error': f'Address range {new_start}-{new_end} conflicts with {existing.device.name} at {existing_start}-{existing_end}'}), 400
         
         # Create patch
         patch = PatchedDevice(
@@ -156,6 +160,54 @@ def update_patch_position():
         
         patch.x_position = x_position
         patch.y_position = y_position
+        db.session.commit()
+        
+        return jsonify({'success': True})
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@device_api.route('/api/update-patch-address', methods=['POST'])
+def update_patch_address():
+    try:
+        data = request.get_json()
+        patch_id = data.get('patch_id')
+        start_address = data.get('start_address')
+        
+        if not patch_id or not start_address:
+            return jsonify({'error': 'patch_id and start_address are required'}), 400
+        
+        patch = db.session.get(PatchedDevice, patch_id)
+        if not patch:
+            return jsonify({'error': 'Patch not found'}), 404
+        
+        device = patch.device
+        channels = device.get_channels()
+        channel_count = len(channels)
+        
+        # Check if new addresses are available
+        if start_address < 1 or start_address + channel_count - 1 > 512:
+            return jsonify({'error': 'Address range exceeds DMX universe (1-512 channels)'}), 400
+        
+        # Check for overlapping addresses with existing patches (excluding current patch)
+        existing_patches = PatchedDevice.query.filter(PatchedDevice.id != patch_id).all()
+        for existing in existing_patches:
+            existing_channels = existing.device.get_channels()
+            existing_channel_count = len(existing_channels) if existing_channels else 1
+            existing_start = existing.start_address
+            existing_end = existing_start + existing_channel_count - 1
+            
+            # Check if new device range overlaps with existing device range
+            new_start = start_address
+            new_end = start_address + channel_count - 1
+            
+            # Ranges overlap if: new_start <= existing_end AND new_end >= existing_start
+            if new_start <= existing_end and new_end >= existing_start:
+                return jsonify({'error': f'Address range {new_start}-{new_end} conflicts with {existing.device.name} at {existing_start}-{existing_end}'}), 400
+        
+        # Update the patch address
+        patch.start_address = start_address
         db.session.commit()
         
         return jsonify({'success': True})

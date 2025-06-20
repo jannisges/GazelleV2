@@ -306,10 +306,31 @@ function formatFileSize(bytes) {
 // Device channel type colors
 const channelTypeColors = {
     'dimmer_channel': '#ffc107',
+    'dimmer_fine': '#ffc107',
     'red_channel': '#dc3545',
     'green_channel': '#28a745',
     'blue_channel': '#007bff',
     'white_channel': '#f8f9fa',
+    'pan': '#17a2b8',
+    'pan_fine': '#17a2b8',
+    'tilt': '#6f42c1',
+    'tilt_fine': '#6f42c1',
+    'gobo1': '#fd7e14',
+    'gobo2': '#fd7e14',
+    'gobo_rotation': '#fd7e14',
+    'gobo_rotation_fine': '#fd7e14',
+    'color_wheel': '#e83e8c',
+    'strobe': '#20c997',
+    'prism': '#795548',
+    'prisma_rotation': '#795548',
+    'frost': '#9e9e9e',
+    'zoom': '#607d8b',
+    'zoom_fine': '#607d8b',
+    'focus': '#3f51b5',
+    'focus_fine': '#3f51b5',
+    'macro': '#9c27b0',
+    'special_functions': '#ff5722',
+    'reset': '#f44336',
     'dummy': '#6c757d'
 };
 

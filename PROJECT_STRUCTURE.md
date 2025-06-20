@@ -7,8 +7,7 @@ The DMX Lighting Control application has been refactored from a monolithic 2,184
 
 ```
 GazelleV2/
-├── app.py                          # Main Flask application (115 lines)
-├── app_original.py                 # Backup of original monolithic file
+├── app.py                          # Main Flask application
 ├── requirements.txt                # Python dependencies
 ├── 
 ├── app/                           # Main application package
@@ -16,24 +15,24 @@ GazelleV2/
 │   │
 │   ├── models/                   # Database models
 │   │   ├── __init__.py          
-│   │   └── models.py            # SQLAlchemy models (60 lines)
+│   │   └── models.py            # SQLAlchemy models
 │   │
 │   ├── hardware/                 # Hardware controllers
 │   │   ├── __init__.py          
-│   │   └── hardware.py          # DMX & Audio controllers (160 lines)
+│   │   └── hardware.py          # DMX & Audio controllers
 │   │
 │   ├── services/                 # Business logic services
 │   │   ├── __init__.py          
-│   │   ├── playback.py          # Sequence playback logic (140 lines)
-│   │   └── audio_processing.py  # Audio analysis & processing (220 lines)
+│   │   ├── playback.py          # Sequence playback logic
+│   │   └── audio_processing.py  # Audio analysis & processing
 │   │
 │   └── api/                      # REST API endpoints
 │       ├── __init__.py          
-│       ├── device_api.py        # Device management (190 lines)
-│       ├── sequence_api.py      # Sequence & playlist management (350 lines)
-│       ├── playback_api.py      # Playback control (220 lines)
-│       ├── network_api.py       # Network & WiFi management (350 lines)
-│       └── system_api.py        # System settings & admin (270 lines)
+│       ├── device_api.py        # Device management
+│       ├── sequence_api.py      # Sequence & playlist management
+│       ├── playback_api.py      # Playback control
+│       ├── network_api.py       # Network & WiFi management
+│       └── system_api.py        # System settings & admin
 │
 ├── templates/                    # Jinja2 HTML templates
 │   ├── base.html

@@ -125,3 +125,7 @@ pip install -r requirements.txt
 - `/backups/`: Automated system backups
 - `test_*.py`: Hardware validation scripts
 - `install.sh`: Complete Raspberry Pi setup automation
+
+## Development Troubleshooting
+
+- You can't run the current project because the venv is a windows venv.
