@@ -19,6 +19,28 @@
                                placeholder="e.g., RGB Par Can, Moving Head, etc.">
                     </div>
                     
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Shape</label>
+                            <input type="hidden" id="deviceShape" name="shape" value="circle">
+                            <div class="shape-selector">
+                                <button type="button" class="shape-btn active" data-shape="circle" onclick="selectShape('circle')">
+                                    <div class="shape-preview circle"></div>
+                                    <span>Circle</span>
+                                </button>
+                                <button type="button" class="shape-btn" data-shape="square" onclick="selectShape('square')">
+                                    <div class="shape-preview square"></div>
+                                    <span>Square</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="deviceColor" class="form-label">Outline Color</label>
+                            <input type="color" class="form-control form-control-color" id="deviceColor" 
+                                   name="color" value="#ffffff" onchange="updatePreview()">
+                        </div>
+                    </div>
+                    
                     <div class="mb-3">
                         <label class="form-label">Channel Configuration</label>
                         <div class="channel-config" id="channelConfig">
@@ -124,13 +146,6 @@
                         <small class="text-muted">Add channels to see summary</small>
                     </div>
                 </div>
-                
-                <div class="mt-3">
-                    <h6>Test Controls</h6>
-                    <div id="testControls">
-                        <!-- Test controls will be generated based on channels -->
-                    </div>
-                </div>
             </div>
         </div>
         
@@ -177,7 +192,6 @@
 .preview-fixture {
     width: 60px;
     height: 60px;
-    border-radius: 30px;
     border: 3px solid #fff;
     background: #333;
     display: flex;
@@ -189,6 +203,63 @@
     text-align: center;
     transition: all 0.3s ease;
     box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+}
+
+.preview-fixture.circle {
+    border-radius: 30px;
+}
+
+.preview-fixture.square {
+    border-radius: 8px;
+}
+
+.shape-selector {
+    display: flex;
+    gap: 10px;
+}
+
+.shape-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    gap: 6px;
+}
+
+.shape-btn:hover {
+    border-color: #007bff;
+    background-color: #f8f9fa;
+}
+
+.shape-btn.active {
+    border-color: #007bff;
+    background-color: #e7f3ff;
+}
+
+.shape-preview {
+    width: 24px;
+    height: 24px;
+    border: 2px solid #6c757d;
+    background: #f8f9fa;
+}
+
+.shape-preview.circle {
+    border-radius: 12px;
+}
+
+.shape-preview.square {
+    border-radius: 3px;
+}
+
+.shape-btn span {
+    font-size: 12px;
+    font-weight: 500;
+    color: #495057;
 }
 
 .channel-item {
@@ -216,24 +287,6 @@
     flex-shrink: 0;
 }
 
-.test-control {
-    margin: 10px 0;
-}
-
-.test-control label {
-    font-size: 12px;
-    font-weight: 500;
-    margin-bottom: 5px;
-}
-
-.test-control input[type="range"] {
-    width: 100%;
-}
-
-.test-control input[type="color"] {
-    width: 100%;
-    height: 30px;
-}
 </style>
 {% endblock %}
 
@@ -377,12 +430,20 @@
     
     function updatePreview() {
         const deviceName = document.getElementById('deviceName').value || 'Device';
+        const deviceShape = document.getElementById('deviceShape').value || 'circle';
+        const deviceColor = document.getElementById('deviceColor').value || '#ffffff';
         const channels = Array.from(document.querySelectorAll('.channel-item select')).map(select => ({
             type: select.value
         }));
         
         // Update device name
         document.getElementById('previewName').textContent = deviceName;
+        
+        // Update preview fixture shape and color
+        const fixture = document.getElementById('previewFixture');
+        fixture.className = `preview-fixture ${deviceShape}`;
+        fixture.style.borderColor = deviceColor;
+        fixture.style.boxShadow = `0 0 20px ${deviceColor}40`;
         
         // Update channel summary
         const summary = channels.map((ch, i) => 
@@ -393,86 +454,20 @@
         ).join('');
         
         document.getElementById('channelSummary').innerHTML = summary || '<small class="text-muted">No channels configured</small>';
-        
-        // Update test controls
-        updateTestControls(channels);
-        
-        // Update preview fixture color based on channels
-        updatePreviewFixture(channels);
     }
     
-    function updateTestControls(channels) {
-        const testControls = document.getElementById('testControls');
-        testControls.innerHTML = '';
+    function selectShape(shape) {
+        // Update hidden input
+        document.getElementById('deviceShape').value = shape;
         
-        const hasColor = channels.some(ch => ['red_channel', 'green_channel', 'blue_channel'].includes(ch.type));
-        const hasDimmer = channels.some(ch => ch.type === 'dimmer_channel');
-        const hasWhite = channels.some(ch => ch.type === 'white_channel');
+        // Update button states
+        document.querySelectorAll('.shape-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`[data-shape="${shape}"]`).classList.add('active');
         
-        if (hasDimmer) {
-            const dimmerControl = document.createElement('div');
-            dimmerControl.className = 'test-control';
-            dimmerControl.innerHTML = `
-                <label>Dimmer</label>
-                <input type="range" class="form-range" min="0" max="100" value="100" 
-                       onchange="testFixture('dimmer', this.value)">
-            `;
-            testControls.appendChild(dimmerControl);
-        }
-        
-        if (hasColor) {
-            const colorControl = document.createElement('div');
-            colorControl.className = 'test-control';
-            colorControl.innerHTML = `
-                <label>Color</label>
-                <input type="color" class="form-control form-control-color" value="#ffffff" 
-                       onchange="testFixture('color', this.value)">
-            `;
-            testControls.appendChild(colorControl);
-        }
-        
-        if (hasWhite) {
-            const whiteControl = document.createElement('div');
-            whiteControl.className = 'test-control';
-            whiteControl.innerHTML = `
-                <label>White</label>
-                <input type="range" class="form-range" min="0" max="255" value="0" 
-                       onchange="testFixture('white', this.value)">
-            `;
-            testControls.appendChild(whiteControl);
-        }
-        
-        if (!hasDimmer && !hasColor && !hasWhite) {
-            testControls.innerHTML = '<small class="text-muted">No testable channels</small>';
-        }
-    }
-    
-    function updatePreviewFixture(channels) {
-        const fixture = document.getElementById('previewFixture');
-        
-        // Reset to default
-        fixture.style.background = '#333';
-        fixture.style.opacity = '1';
-        fixture.style.boxShadow = '0 0 20px rgba(255, 255, 255, 0.3)';
-    }
-    
-    function testFixture(type, value) {
-        const fixture = document.getElementById('previewFixture');
-        
-        switch(type) {
-            case 'dimmer':
-                fixture.style.opacity = value / 100;
-                break;
-            case 'color':
-                const rgb = DMXUtils.hexToRgb(value);
-                fixture.style.background = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
-                fixture.style.boxShadow = `0 0 30px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.8)`;
-                break;
-            case 'white':
-                const whiteLevel = parseInt(value);
-                fixture.style.background = `rgb(${whiteLevel}, ${whiteLevel}, ${whiteLevel})`;
-                break;
-        }
+        // Update preview
+        updatePreview();
     }
     
     function loadTemplate(templateKey) {
@@ -524,7 +519,9 @@
             
             const deviceData = {
                 name: deviceName,
-                channels: channels
+                channels: channels,
+                shape: document.getElementById('deviceShape').value,
+                color: document.getElementById('deviceColor').value
             };
             
             if (currentDeviceId) {
@@ -559,6 +556,17 @@
                 
                 // Set device name
                 document.getElementById('deviceName').value = device.name;
+                
+                // Set device shape and color
+                const deviceShape = device.shape || 'circle';
+                document.getElementById('deviceShape').value = deviceShape;
+                document.getElementById('deviceColor').value = device.color || '#ffffff';
+                
+                // Update shape button selection
+                document.querySelectorAll('.shape-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                document.querySelector(`[data-shape="${deviceShape}"]`).classList.add('active');
                 
                 // Clear existing channels
                 document.getElementById('channelList').innerHTML = '';

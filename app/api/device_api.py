@@ -9,6 +9,8 @@ def save_device():
         data = request.get_json()
         name = data.get('name')
         channels = data.get('channels', [])
+        shape = data.get('shape', 'circle')
+        color = data.get('color', '#ffffff')
         device_id = data.get('id')
         
         if not name:
@@ -20,10 +22,12 @@ def save_device():
             if not device:
                 return jsonify({'error': 'Device not found'}), 404
             device.name = name
+            device.shape = shape
+            device.color = color
             device.set_channels(channels)
         else:
             # Create new device
-            device = Device(name=name)
+            device = Device(name=name, shape=shape, color=color)
             device.set_channels(channels)
             db.session.add(device)
         
@@ -46,7 +50,9 @@ def get_device(device_id):
             'device': {
                 'id': device.id,
                 'name': device.name,
-                'channels': device.channels
+                'channels': device.channels,
+                'shape': device.shape,
+                'color': device.color
             }
         })
     
@@ -114,8 +120,8 @@ def patch_device():
         patch = PatchedDevice(
             device_id=device_id,
             start_address=start_address,
-            x_position=50,
-            y_position=50
+            x_position=0,
+            y_position=0
         )
         
         db.session.add(patch)
@@ -232,7 +238,9 @@ def get_patched_devices():
                 'device': {
                     'id': patch.device.id,
                     'name': patch.device.name,
-                    'channels': patch.device.get_channels()
+                    'channels': patch.device.get_channels(),
+                    'shape': patch.device.shape or 'circle',
+                    'color': patch.device.color or '#ffffff'
                 }
             })
         
@@ -266,7 +274,9 @@ def export_patch():
             export_data['devices'].append({
                 'id': device.id,
                 'name': device.name,
-                'channels': device.get_channels()
+                'channels': device.get_channels(),
+                'shape': device.shape or 'circle',
+                'color': device.color or '#ffffff'
             })
         
         # Export patches

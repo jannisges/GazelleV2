@@ -1,6 +1,6 @@
 /**
- * Enhanced Patch Management for DMX Lighting Control
- * Handles device patching, visual display, and 2D plan view with coordinate system, grid, and zoom
+ * Patch Management for DMX Lighting Control
+ * Handles device patching, visual display, and 2D plan view
  */
 
 class PatchManager {
@@ -282,13 +282,10 @@ class PatchManager {
         // Add patched devices
         this.patchedDevices.forEach(patch => {
             const fixture = document.createElement('div');
-            fixture.className = `plan-fixture ${patch.device.shape || 'circle'}`;
+            fixture.className = 'plan-fixture';
             fixture.dataset.patchId = patch.id;
             fixture.textContent = patch.start_address;
             fixture.title = patch.device.name;
-            
-            // Set border color for the fixture
-            fixture.style.borderColor = patch.device.color || '#ffffff';
             
             // Convert coordinates - if old % system, convert to pixel coordinates
             let x = patch.x_position || 0;
@@ -503,11 +500,11 @@ class PatchManager {
             const centerX = rect.width / 2;
             const centerY = rect.height / 2;
             
-            // Calculate new position relative to center in world coordinates
+            // Calculate new position relative to center
             let x = (e.clientX - rect.left - this.dragOffset.x) - centerX;
             let y = (e.clientY - rect.top - this.dragOffset.y) - centerY;
             
-            // Convert to world coordinates by dividing by zoom
+            // Apply zoom transform
             x = x / this.zoom;
             y = y / this.zoom;
             
@@ -520,9 +517,12 @@ class PatchManager {
                 fixture.classList.remove('snapped');
             }
             
-            // Position fixture at world coordinates (scaling handled by CSS transform)
-            fixture.style.left = `${centerX + x}px`;
-            fixture.style.top = `${centerY + y}px`;
+            // Apply zoom and pan transforms
+            const displayX = centerX + (x * this.zoom);
+            const displayY = centerY + (y * this.zoom);
+            
+            fixture.style.left = `${displayX}px`;
+            fixture.style.top = `${displayY}px`;
         };
         
         const onMouseUp = (e) => {
@@ -530,17 +530,16 @@ class PatchManager {
             
             this.isDraggingFixture = false;
             fixture.classList.remove('dragging');
-            fixture.classList.remove('snapped');
             
             const rect = this.planView.getBoundingClientRect();
             const centerX = rect.width / 2;
             const centerY = rect.height / 2;
             
-            // Calculate final world coordinates
+            // Calculate final position
             let x = (e.clientX - rect.left - this.dragOffset.x) - centerX;
             let y = (e.clientY - rect.top - this.dragOffset.y) - centerY;
             
-            // Convert to world coordinates by dividing by zoom
+            // Apply zoom transform
             x = x / this.zoom;
             y = y / this.zoom;
             
@@ -578,205 +577,6 @@ class PatchManager {
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
     }
-
-    // === GRID FUNCTIONALITY ===
-    
-    initializeGrid() {
-        this.updateGrid();
-    }
-    
-    updateGrid() {
-        const gridContainer = document.getElementById('planViewGrid');
-        if (!gridContainer || !this.planView) return;
-        
-        const rect = this.planView.getBoundingClientRect();
-        const centerX = rect.width / 2;
-        const centerY = rect.height / 2;
-        
-        // Clear existing grid
-        gridContainer.innerHTML = '';
-        
-        if (!this.gridEnabled) return;
-        
-        // Create SVG grid
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.style.width = '100%';
-        svg.style.height = '100%';
-        
-        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        const pattern = document.createElementNS('http://www.w3.org/2000/svg', 'pattern');
-        pattern.setAttribute('id', 'grid');
-        // Keep grid size constant regardless of zoom
-        pattern.setAttribute('width', this.gridSize);
-        pattern.setAttribute('height', this.gridSize);
-        pattern.setAttribute('patternUnits', 'userSpaceOnUse');
-        
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', `M ${this.gridSize} 0 L 0 0 0 ${this.gridSize}`);
-        path.setAttribute('fill', 'none');
-        path.setAttribute('stroke', '#ffffff');
-        path.setAttribute('stroke-width', '1');
-        path.setAttribute('opacity', '0.3');
-        
-        pattern.appendChild(path);
-        defs.appendChild(pattern);
-        svg.appendChild(defs);
-        
-        const rect_el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect_el.setAttribute('width', '100%');
-        rect_el.setAttribute('height', '100%');
-        rect_el.setAttribute('fill', 'url(#grid)');
-        // Center the grid pattern
-        rect_el.setAttribute('x', centerX % this.gridSize - this.gridSize);
-        rect_el.setAttribute('y', centerY % this.gridSize - this.gridSize);
-        svg.appendChild(rect_el);
-        
-        // Add center axes
-        const axisGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        
-        // Horizontal axis
-        const hAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        hAxis.setAttribute('x1', '0');
-        hAxis.setAttribute('y1', centerY);
-        hAxis.setAttribute('x2', rect.width);
-        hAxis.setAttribute('y2', centerY);
-        hAxis.setAttribute('stroke', '#ff6b6b');
-        hAxis.setAttribute('stroke-width', '2');
-        hAxis.setAttribute('opacity', '0.7');
-        
-        // Vertical axis
-        const vAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        vAxis.setAttribute('x1', centerX);
-        vAxis.setAttribute('y1', '0');
-        vAxis.setAttribute('x2', centerX);
-        vAxis.setAttribute('y2', rect.height);
-        vAxis.setAttribute('stroke', '#ff6b6b');
-        vAxis.setAttribute('stroke-width', '2');
-        vAxis.setAttribute('opacity', '0.7');
-        
-        axisGroup.appendChild(hAxis);
-        axisGroup.appendChild(vAxis);
-        svg.appendChild(axisGroup);
-        
-        gridContainer.appendChild(svg);
-    }
-    
-    toggleGrid() {
-        this.gridEnabled = !this.gridEnabled;
-        this.snapToGrid = this.gridEnabled; // Disable snap when grid is disabled
-        
-        const button = document.getElementById('gridToggle');
-        if (button) {
-            if (this.gridEnabled) {
-                button.classList.add('active');
-            } else {
-                button.classList.remove('active');
-            }
-        }
-        
-        this.updateGrid();
-    }
-    
-    // === ZOOM AND PAN FUNCTIONALITY ===
-    
-    initializeZoomPan() {
-        if (!this.planView || !this.planViewContent) return;
-        
-        // Mouse wheel zoom
-        this.planView.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            
-            const rect = this.planView.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            const newZoom = Math.max(0.1, Math.min(5, this.zoom * delta));
-            
-            this.setZoom(newZoom, mouseX, mouseY);
-        });
-        
-        // Position origin at center
-        this.updateOriginPosition();
-    }
-    
-    setZoom(newZoom, centerX = null, centerY = null) {
-        if (!this.planViewContent) return;
-        
-        const rect = this.planView.getBoundingClientRect();
-        const actualCenterX = centerX || rect.width / 2;
-        const actualCenterY = centerY || rect.height / 2;
-        
-        this.zoom = newZoom;
-        
-        // Apply transform to both content and grid
-        this.planViewContent.style.transform = `scale(${this.zoom})`;
-        
-        // Apply same transform to grid
-        const gridContainer = document.getElementById('planViewGrid');
-        if (gridContainer) {
-            gridContainer.style.transform = `scale(${this.zoom})`;
-        }
-        
-        // Update fixture positions to maintain their world coordinates
-        this.updatePlanView();
-    }
-    
-    updateOriginPosition() {
-        const origin = document.getElementById('planViewOrigin');
-        if (!origin || !this.planView) return;
-        
-        const rect = this.planView.getBoundingClientRect();
-        origin.style.left = `${rect.width / 2}px`;
-        origin.style.top = `${rect.height / 2}px`;
-    }
-    
-    zoomToFit() {
-        if (this.patchedDevices.length === 0) {
-            this.setZoom(1);
-            return;
-        }
-        
-        // Find bounds of all fixtures
-        let minX = Infinity, maxX = -Infinity;
-        let minY = Infinity, maxY = -Infinity;
-        
-        this.patchedDevices.forEach(patch => {
-            let x = patch.x_position || 0;
-            let y = patch.y_position || 0;
-            
-            // Convert from percentage to pixels if needed
-            if (x <= 100 && y <= 100 && x >= 0 && y >= 0) {
-                const rect = this.planView.getBoundingClientRect();
-                x = (x - 50) * (rect.width / 100);
-                y = (y - 50) * (rect.height / 100);
-            }
-            
-            minX = Math.min(minX, x);
-            maxX = Math.max(maxX, x);
-            minY = Math.min(minY, y);
-            maxY = Math.max(maxY, y);
-        });
-        
-        // Add padding
-        const padding = 50;
-        minX -= padding;
-        maxX += padding;
-        minY -= padding;
-        maxY += padding;
-        
-        const rect = this.planView.getBoundingClientRect();
-        const boundsWidth = maxX - minX;
-        const boundsHeight = maxY - minY;
-        
-        const scaleX = rect.width / boundsWidth;
-        const scaleY = rect.height / boundsHeight;
-        const newZoom = Math.min(scaleX, scaleY, 2); // Cap at 2x zoom
-        
-        this.setZoom(Math.max(0.1, newZoom));
-    }
-    
-    // [Continue with the rest of the methods from the original file...]
     
     setupEventListeners() {
         // Drag and drop for device patching
@@ -1512,17 +1312,5 @@ function editDevicePosition() {
 function savePosition() {
     if (patchManager) {
         patchManager.savePosition();
-    }
-}
-
-function toggleGrid() {
-    if (patchManager) {
-        patchManager.toggleGrid();
-    }
-}
-
-function zoomToFit() {
-    if (patchManager) {
-        patchManager.zoomToFit();
     }
 }

@@ -225,13 +225,113 @@ body {
     position: relative;
     overflow: hidden;
     cursor: crosshair;
+    user-select: none;
+}
+
+.plan-view-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.plan-view-content {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    transform-origin: center center;
+    transition: transform 0.2s ease;
+    z-index: 2;
+}
+
+.plan-view-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0.3;
+    pointer-events: none;
+    z-index: 1;
+    transform-origin: center center;
+}
+
+.plan-view-grid svg {
+    width: 100%;
+    height: 100%;
+}
+
+.plan-view-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    z-index: 100;
+}
+
+.plan-view-controls .btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    backdrop-filter: blur(5px);
+}
+
+.plan-view-controls .btn:hover {
+    background: rgba(0, 0, 0, 0.9);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.plan-view-controls .btn.active {
+    background: rgba(0, 123, 255, 0.8);
+    border-color: #007bff;
+}
+
+.plan-view-origin {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #ff6b6b;
+    background: rgba(255, 107, 107, 0.2);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 50;
+    transform: translate(-50%, -50%);
+}
+
+.plan-view-origin::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 200px;
+    height: 1px;
+    background: rgba(255, 107, 107, 0.5);
+    transform: translate(-50%, -50%);
+}
+
+.plan-view-origin::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 1px;
+    height: 200px;
+    background: rgba(255, 107, 107, 0.5);
+    transform: translate(-50%, -50%);
 }
 
 .plan-fixture {
     position: absolute;
     width: 30px;
     height: 30px;
-    border-radius: 15px;
     border: 2px solid #fff;
     background: #333;
     cursor: move;
@@ -243,6 +343,21 @@ body {
     font-weight: bold;
     transition: all 0.1s ease;
     box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    transform: translate(-50%, -50%);
+    z-index: 10;
+}
+
+.plan-fixture.circle {
+    border-radius: 15px;
+}
+
+.plan-fixture.square {
+    border-radius: 4px;
+}
+
+.plan-fixture.snapped {
+    box-shadow: 0 0 15px rgba(40, 167, 69, 0.8);
+    border-color: #28a745;
 }
 
 .plan-fixture:hover {
@@ -258,6 +373,7 @@ body {
 .plan-fixture.dragging {
     z-index: 1000;
     opacity: 0.8;
+    cursor: grabbing;
 }
 
 /* Channel Configuration */

@@ -83,7 +83,9 @@ def patch():
             'device': {
                 'id': pd.device.id,
                 'name': pd.device.name,
-                'channels': device_channels
+                'channels': device_channels,
+                'shape': pd.device.shape or 'circle',
+                'color': pd.device.color or '#ffffff'
             }
         })
     
