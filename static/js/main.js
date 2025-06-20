@@ -104,6 +104,14 @@ function apiCall(endpoint, method = 'GET', data = null) {
 
 // Drag and drop functionality
 function initializeDragAndDrop() {
+    // Check if we're on the patch page by looking for DMX grid element
+    // If so, skip initialization as patch.js will handle drag and drop
+    const dmxGrid = document.getElementById('dmxGrid');
+    if (dmxGrid) {
+        console.log('DMX Grid detected, skipping main.js drag and drop initialization (patch.js will handle it)');
+        return;
+    }
+    
     document.addEventListener('dragstart', handleDragStart);
     document.addEventListener('dragover', handleDragOver);
     document.addEventListener('drop', handleDrop);
