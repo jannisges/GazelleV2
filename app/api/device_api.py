@@ -100,6 +100,14 @@ def patch_device():
         if start_address < 1 or start_address + channel_count - 1 > 512:
             return jsonify({'error': 'Address range exceeds DMX universe (1-512 channels)'}), 400
         
+        # Check if this device is already patched at this address
+        existing_patch_same_device = PatchedDevice.query.filter_by(
+            device_id=device_id, 
+            start_address=start_address
+        ).first()
+        if existing_patch_same_device:
+            return jsonify({'error': f'Device "{device.name}" is already patched at address {start_address}'}), 400
+        
         # Check for overlapping addresses with existing patches
         existing_patches = PatchedDevice.query.all()
         for existing in existing_patches:

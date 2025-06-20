@@ -192,62 +192,93 @@ class PatchManager {
         
         // Wait a moment for the grid to be fully rendered
         setTimeout(() => {
-            // Create device name label that looks like a DMX address box
-            const label = document.createElement('div');
-            label.className = 'device-name-label';
-            label.textContent = deviceName;
-            label.title = `${deviceName} (${channelCount} channels)`;
-            label.dataset.deviceAddress = firstAddressElement.dataset.address;
-            
-            // Position the label absolutely above the first address element
-            const gridRect = dmxGrid.getBoundingClientRect();
-            const addressRect = firstAddressElement.getBoundingClientRect();
-            
-            // Calculate position relative to the grid
-            const left = addressRect.left - gridRect.left;
-            const top = addressRect.top - gridRect.top;
-            
-            // Calculate width to span all channels
-            // Each DMX address box is 40px wide + 2px gap after it (except the last one)
+            const startAddress = parseInt(firstAddressElement.dataset.address);
             const boxWidth = 40; // Width of each box
             const gapWidth = 2; // Gap between boxes
-            const labelWidth = (channelCount * boxWidth) + ((channelCount - 1) * gapWidth);
             
-            label.style.position = 'absolute';
-            label.style.left = `${left}px`;
-            label.style.top = `${top}px`;
-            label.style.width = `${labelWidth}px`;
-            label.style.zIndex = '10';
-            label.style.cursor = 'pointer';
+            // Calculate how many channels fit on current row starting from this address
+            const currentRow = Math.floor((startAddress - 1) / this.addressesPerRow);
+            const positionInRow = (startAddress - 1) % this.addressesPerRow;
+            const channelsOnCurrentRow = Math.min(channelCount, this.addressesPerRow - positionInRow);
             
-            // Add event listeners to the device label
-            const startAddress = parseInt(firstAddressElement.dataset.address);
-            console.log(`Adding event listeners to device label ${deviceName} at address ${startAddress}`);
+            // Create the first label for the current row
+            this.createSingleRowLabel(dmxGrid, firstAddressElement, deviceName, channelsOnCurrentRow, channelCount, startAddress);
             
-            label.addEventListener('click', (e) => {
-                console.log('Device label clicked:', deviceName);
-                this.handleAddressClick(e, startAddress);
-            });
-            label.addEventListener('mousedown', (e) => {
-                console.log('Mouse down on device label:', deviceName);
-                this.handleMouseDown(e, startAddress);
-            });
-            label.addEventListener('mouseup', (e) => {
-                console.log('Mouse up on device label:', deviceName);
-                this.handleMouseUp(e, startAddress);
-            });
-            label.addEventListener('contextmenu', (e) => {
-                console.log('Context menu on device label:', deviceName);
-                this.handleContextMenu(e, startAddress);
-            });
+            // If device spans multiple rows, create additional labels
+            let remainingChannels = channelCount - channelsOnCurrentRow;
+            let currentAddress = startAddress + channelsOnCurrentRow;
             
-            console.log(`Event listeners added to device label ${deviceName}`);
+            while (remainingChannels > 0) {
+                const channelsOnThisRow = Math.min(remainingChannels, this.addressesPerRow);
+                const addressElement = document.querySelector(`[data-address="${currentAddress}"]`);
+                
+                if (addressElement) {
+                    this.createSingleRowLabel(dmxGrid, addressElement, deviceName, channelsOnThisRow, channelCount, startAddress);
+                }
+                
+                remainingChannels -= channelsOnThisRow;
+                currentAddress += channelsOnThisRow;
+            }
             
-            // Add to grid
-            dmxGrid.appendChild(label);
-            
-            console.log(`Created device label: ${deviceName} above address ${firstAddressElement.dataset.address} at position ${left}, ${top}, width: ${labelWidth}px for ${channelCount} channels`);
+            console.log(`Created device labels for ${deviceName} spanning ${Math.ceil(channelCount / this.addressesPerRow)} rows`);
         }, 50);
+    }
+    
+    createSingleRowLabel(dmxGrid, firstAddressElement, deviceName, channelsInThisRow, totalChannels, originalStartAddress) {
+        // Create device name label that looks like a DMX address box
+        const label = document.createElement('div');
+        label.className = 'device-name-label';
+        label.textContent = deviceName;
+        label.title = `${deviceName} (${totalChannels} channels)`;
+        label.dataset.deviceAddress = originalStartAddress;
+        
+        // Position the label absolutely above the first address element
+        const gridRect = dmxGrid.getBoundingClientRect();
+        const addressRect = firstAddressElement.getBoundingClientRect();
+        
+        // Calculate position relative to the grid
+        const left = addressRect.left - gridRect.left;
+        const top = addressRect.top - gridRect.top;
+        
+        // Calculate width to span channels on this row only
+        const boxWidth = 40; // Width of each box
+        const gapWidth = 2; // Gap between boxes
+        const labelWidth = (channelsInThisRow * boxWidth) + ((channelsInThisRow - 1) * gapWidth);
+        
+        label.style.position = 'absolute';
+        label.style.left = `${left}px`;
+        label.style.top = `${top}px`;
+        label.style.width = `${labelWidth}px`;
+        label.style.zIndex = '10';
+        label.style.cursor = 'pointer';
+        
+        // Add event listeners to the device label
+        const startAddress = parseInt(firstAddressElement.dataset.address);
+        console.log(`Adding event listeners to device label ${deviceName} at address ${startAddress}`);
+        
+        label.addEventListener('click', (e) => {
+            console.log('Device label clicked:', deviceName);
+            this.handleAddressClick(e, originalStartAddress);
+        });
+        label.addEventListener('mousedown', (e) => {
+            console.log('Mouse down on device label:', deviceName);
+            this.handleMouseDown(e, originalStartAddress);
+        });
+        label.addEventListener('mouseup', (e) => {
+            console.log('Mouse up on device label:', deviceName);
+            this.handleMouseUp(e, originalStartAddress);
+        });
+        label.addEventListener('contextmenu', (e) => {
+            console.log('Context menu on device label:', deviceName);
+            this.handleContextMenu(e, originalStartAddress);
+        });
+        
+        console.log(`Event listeners added to device label ${deviceName}`);
+        
+        // Add to grid
+        dmxGrid.appendChild(label);
+        
+        console.log(`Created single row label: ${deviceName} above address ${firstAddressElement.dataset.address} at position ${left}, ${top}, width: ${labelWidth}px for ${channelsInThisRow} channels`);
     }
     
     initializePlanView() {
@@ -598,10 +629,15 @@ class PatchManager {
         
         if (!this.gridEnabled) return;
         
+        // Calculate grid extent based on zoom level - make grid larger when zoomed out
+        const gridExtent = Math.max(rect.width, rect.height) * (2 / this.zoom);
+        const gridSize = Math.max(gridExtent, 2000); // Minimum grid size of 2000px
+        
         // Create SVG grid
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.style.width = '100%';
         svg.style.height = '100%';
+        svg.style.overflow = 'visible'; // Allow grid to extend beyond viewport
         
         const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
         const pattern = document.createElementNS('http://www.w3.org/2000/svg', 'pattern');
@@ -622,23 +658,24 @@ class PatchManager {
         defs.appendChild(pattern);
         svg.appendChild(defs);
         
+        // Create a larger grid rectangle that extends beyond viewport when zoomed out
         const rect_el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect_el.setAttribute('width', '100%');
-        rect_el.setAttribute('height', '100%');
+        rect_el.setAttribute('width', gridSize);
+        rect_el.setAttribute('height', gridSize);
         rect_el.setAttribute('fill', 'url(#grid)');
-        // Center the grid pattern
-        rect_el.setAttribute('x', centerX % this.gridSize - this.gridSize);
-        rect_el.setAttribute('y', centerY % this.gridSize - this.gridSize);
+        // Center the grid pattern around the viewport center
+        rect_el.setAttribute('x', centerX - gridSize / 2);
+        rect_el.setAttribute('y', centerY - gridSize / 2);
         svg.appendChild(rect_el);
         
-        // Add center axes
+        // Add center axes that extend across the entire grid
         const axisGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         
         // Horizontal axis
         const hAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        hAxis.setAttribute('x1', '0');
+        hAxis.setAttribute('x1', centerX - gridSize / 2);
         hAxis.setAttribute('y1', centerY);
-        hAxis.setAttribute('x2', rect.width);
+        hAxis.setAttribute('x2', centerX + gridSize / 2);
         hAxis.setAttribute('y2', centerY);
         hAxis.setAttribute('stroke', '#ff6b6b');
         hAxis.setAttribute('stroke-width', '2');
@@ -647,9 +684,9 @@ class PatchManager {
         // Vertical axis
         const vAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         vAxis.setAttribute('x1', centerX);
-        vAxis.setAttribute('y1', '0');
+        vAxis.setAttribute('y1', centerY - gridSize / 2);
         vAxis.setAttribute('x2', centerX);
-        vAxis.setAttribute('y2', rect.height);
+        vAxis.setAttribute('y2', centerY + gridSize / 2);
         vAxis.setAttribute('stroke', '#ff6b6b');
         vAxis.setAttribute('stroke-width', '2');
         vAxis.setAttribute('opacity', '0.7');
@@ -717,6 +754,9 @@ class PatchManager {
         if (gridContainer) {
             gridContainer.style.transform = `scale(${this.zoom})`;
         }
+        
+        // Update grid to extend properly at new zoom level
+        this.updateGrid();
         
         // Update fixture positions to maintain their world coordinates
         this.updatePlanView();

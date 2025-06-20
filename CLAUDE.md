@@ -129,3 +129,7 @@ pip install -r requirements.txt
 ## Development Troubleshooting
 
 - You can't run the current project because the venv is a windows venv.
+
+## Development Guidelines
+
+- Ask questions to make sure you understand everything correctly before you start editing the code. Only start editing the code when I write "SC" in capslock at the end of a message. SC stands for Start Coding.

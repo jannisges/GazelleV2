@@ -112,10 +112,14 @@ function initializeDragAndDrop() {
         return;
     }
     
-    document.addEventListener('dragstart', handleDragStart);
-    document.addEventListener('dragover', handleDragOver);
-    document.addEventListener('drop', handleDrop);
-    document.addEventListener('dragend', handleDragEnd);
+    // Only add drag and drop listeners if we're NOT on the patch page
+    // This prevents duplicate event listeners that cause double patching
+    if (!document.querySelector('script[src*="patch.js"]')) {
+        document.addEventListener('dragstart', handleDragStart);
+        document.addEventListener('dragover', handleDragOver);
+        document.addEventListener('drop', handleDrop);
+        document.addEventListener('dragend', handleDragEnd);
+    }
 }
 
 function handleDragStart(e) {

@@ -29,6 +29,8 @@ body {
     border: 1px solid #dee2e6;
     border-radius: 5px;
     position: relative;
+    width: fit-content;
+    max-width: 100%;
 }
 
 .dmx-address {
@@ -175,7 +177,7 @@ body {
 
 /* Device Library */
 .device-library {
-    max-height: 300px;
+    max-height: 200px;
     overflow-y: auto;
     padding: 10px;
     background-color: #f8f9fa;
