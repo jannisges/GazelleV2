@@ -466,6 +466,10 @@ class PlanViewController {
         this.dragOffset = { x: 0, y: 0 };
         this.planViewRect = null;
         this.justFinishedDrag = false;
+        this.selectedFixtures = new Set();
+        this.isSelecting = false;
+        this.selectionStart = { x: 0, y: 0 };
+        this.selectionBox = null;
     }
     
     initialize() {
@@ -477,6 +481,7 @@ class PlanViewController {
         
         this.initializeGrid();
         this.initializeZoomPan();
+        this.initializeSelection();
         
         window.addEventListener('resize', () => {
             this.planViewRect = this.planView.getBoundingClientRect();
@@ -538,17 +543,39 @@ class PlanViewController {
             return;
         }
         
-        // Device Information modal should never open from 2D Plan View
-        // This functionality is intentionally disabled
+        // Handle multiselect with Ctrl+click
+        if (e.ctrlKey || e.metaKey) {
+            this.toggleFixtureSelection(patch.id);
+        } else {
+            // Clear selection and select only this fixture
+            this.clearSelection();
+            this.selectFixture(patch.id);
+        }
+        
+        this.updateSelectionVisuals();
     }
     
     startDragFixture(e, patch) {
         e.preventDefault();
         const fixture = e.target;
         
+        // If the clicked fixture is not selected, make it the only selection
+        if (!this.isFixtureSelected(patch.id)) {
+            this.clearSelection();
+            this.selectFixture(patch.id);
+            this.updateSelectionVisuals();
+        }
+        
         this.isDraggingFixture = true;
         this.draggedFixture = fixture;
-        fixture.classList.add('dragging');
+        
+        // Add dragging class to all selected fixtures
+        this.getSelectedFixtures().forEach(patchId => {
+            const selectedFixture = this.planViewContent.querySelector(`[data-patch-id="${patchId}"]`);
+            if (selectedFixture) {
+                selectedFixture.classList.add('dragging');
+            }
+        });
         
         const rect = this.planView.getBoundingClientRect();
         const fixtureRect = fixture.getBoundingClientRect();
@@ -578,21 +605,48 @@ class PlanViewController {
         if (this.snapToGrid && this.gridEnabled) {
             x = Math.round(x / this.gridSize) * this.gridSize;
             y = Math.round(y / this.gridSize) * this.gridSize;
-            fixture.classList.add('snapped');
-        } else {
-            fixture.classList.remove('snapped');
         }
         
-        fixture.style.left = `${centerX + x}px`;
-        fixture.style.top = `${centerY + y}px`;
+        // Calculate offset from the main dragged fixture
+        const mainPatch = this.getCurrentPatchData().find(p => 
+            p.id === parseInt(this.draggedFixture.dataset.patchId));
+        const deltaX = x - (mainPatch?.x_position || 0);
+        const deltaY = y - (mainPatch?.y_position || 0);
+        
+        // Move all selected fixtures
+        this.getSelectedFixtures().forEach(patchId => {
+            const selectedFixture = this.planViewContent.querySelector(`[data-patch-id="${patchId}"]`);
+            const selectedPatch = this.getCurrentPatchData().find(p => p.id === patchId);
+            
+            if (selectedFixture && selectedPatch) {
+                const newX = (selectedPatch.x_position || 0) + deltaX;
+                const newY = (selectedPatch.y_position || 0) + deltaY;
+                
+                selectedFixture.style.left = `${centerX + newX}px`;
+                selectedFixture.style.top = `${centerY + newY}px`;
+                
+                if (this.snapToGrid && this.gridEnabled) {
+                    selectedFixture.classList.add('snapped');
+                } else {
+                    selectedFixture.classList.remove('snapped');
+                }
+            }
+        });
     }
     
     async handleFixtureDragEnd(e, patch, onMouseMove, onMouseUp) {
         if (!this.isDraggingFixture) return;
         
         this.isDraggingFixture = false;
-        this.draggedFixture.classList.remove('dragging', 'snapped');
         this.justFinishedDrag = true;
+        
+        // Remove dragging class from all selected fixtures
+        this.getSelectedFixtures().forEach(patchId => {
+            const selectedFixture = this.planViewContent.querySelector(`[data-patch-id="${patchId}"]`);
+            if (selectedFixture) {
+                selectedFixture.classList.remove('dragging', 'snapped');
+            }
+        });
         
         const rect = this.planView.getBoundingClientRect();
         const centerX = rect.width / 2;
@@ -609,19 +663,45 @@ class PlanViewController {
             y = Math.round(y / this.gridSize) * this.gridSize;
         }
         
+        // Calculate offset from the main dragged fixture
+        const mainPatch = this.getCurrentPatchData().find(p => 
+            p.id === parseInt(this.draggedFixture.dataset.patchId));
+        const deltaX = x - (mainPatch?.x_position || 0);
+        const deltaY = y - (mainPatch?.y_position || 0);
+        
         try {
-            const response = await PatchAPI.updatePatchPosition(patch.id, x, y);
-            if (response.success) {
-                patch.x_position = x;
-                patch.y_position = y;
-            } else {
-                this.updateView([patch]); // Revert on error
-                this.showNotification('Error updating position: ' + response.error, 'error');
-            }
+            // Update positions for all selected fixtures
+            const updatePromises = this.getSelectedFixtures().map(async (patchId) => {
+                const selectedPatch = this.getCurrentPatchData().find(p => p.id === patchId);
+                if (selectedPatch) {
+                    const newX = (selectedPatch.x_position || 0) + deltaX;
+                    const newY = (selectedPatch.y_position || 0) + deltaY;
+                    
+                    const response = await PatchAPI.updatePatchPosition(patchId, newX, newY);
+                    if (response.success) {
+                        selectedPatch.x_position = newX;
+                        selectedPatch.y_position = newY;
+                        return true;
+                    } else {
+                        throw new Error(response.error || 'Unknown error');
+                    }
+                }
+                return false;
+            });
+            
+            await Promise.all(updatePromises);
+            this.showNotification(`Updated ${this.getSelectedFixtures().length} fixture positions`, 'success');
+            
         } catch (error) {
-            console.error('Error updating position:', error);
-            this.updateView([patch]); // Revert on error
-            this.showNotification('Error updating position', 'error');
+            console.error('Error updating positions:', error);
+            // Revert all fixtures on error
+            this.getSelectedFixtures().forEach(patchId => {
+                const selectedPatch = this.getCurrentPatchData().find(p => p.id === patchId);
+                if (selectedPatch) {
+                    this.updateView([selectedPatch]);
+                }
+            });
+            this.showNotification('Error updating positions: ' + error.message, 'error');
         }
         
         document.removeEventListener('mousemove', onMouseMove);
@@ -824,6 +904,183 @@ class PlanViewController {
     
     setEventHandler(handler) {
         this.eventHandler = handler;
+    }
+    
+    // === SELECTION METHODS ===
+    
+    selectFixture(patchId) {
+        this.selectedFixtures.add(patchId);
+    }
+    
+    deselectFixture(patchId) {
+        this.selectedFixtures.delete(patchId);
+    }
+    
+    toggleFixtureSelection(patchId) {
+        if (this.selectedFixtures.has(patchId)) {
+            this.deselectFixture(patchId);
+        } else {
+            this.selectFixture(patchId);
+        }
+    }
+    
+    clearSelection() {
+        this.selectedFixtures.clear();
+    }
+    
+    getSelectedFixtures() {
+        return Array.from(this.selectedFixtures);
+    }
+    
+    isFixtureSelected(patchId) {
+        return this.selectedFixtures.has(patchId);
+    }
+    
+    updateSelectionVisuals() {
+        // Update visual styling for all fixtures
+        this.planViewContent.querySelectorAll('.plan-fixture').forEach(fixture => {
+            const patchId = parseInt(fixture.dataset.patchId);
+            if (this.isFixtureSelected(patchId)) {
+                fixture.classList.add('selected');
+            } else {
+                fixture.classList.remove('selected');
+            }
+        });
+    }
+    
+    initializeSelection() {
+        if (!this.planView) return;
+        
+        // Add mousedown event for selection box
+        this.planView.addEventListener('mousedown', (e) => {
+            this.handlePlanViewMouseDown(e);
+        });
+        
+        // Add global mouse events for selection
+        document.addEventListener('mousemove', (e) => {
+            this.handleGlobalMouseMove(e);
+        });
+        
+        document.addEventListener('mouseup', (e) => {
+            this.handleGlobalMouseUp(e);
+        });
+    }
+    
+    handlePlanViewMouseDown(e) {
+        // Only start selection if clicking on empty area (not on fixtures) and not already dragging
+        if (!this.isDraggingFixture && 
+            (e.target === this.planView || e.target === this.planViewContent || 
+             e.target.classList.contains('plan-view-grid') || 
+             e.target.closest('.plan-view-grid'))) {
+            
+            e.preventDefault();
+            this.startSelection(e);
+        }
+    }
+    
+    startSelection(e) {
+        this.isSelecting = true;
+        const rect = this.planView.getBoundingClientRect();
+        this.selectionStart.x = e.clientX - rect.left;
+        this.selectionStart.y = e.clientY - rect.top;
+        
+        // Clear previous selection if not holding Ctrl
+        if (!e.ctrlKey && !e.metaKey) {
+            this.clearSelection();
+            this.updateSelectionVisuals();
+        }
+        
+        this.createSelectionBox();
+    }
+    
+    createSelectionBox() {
+        this.selectionBox = document.createElement('div');
+        this.selectionBox.className = 'selection-box';
+        this.selectionBox.style.position = 'absolute';
+        this.selectionBox.style.border = '2px dashed #007bff';
+        this.selectionBox.style.backgroundColor = 'rgba(0, 123, 255, 0.1)';
+        this.selectionBox.style.pointerEvents = 'none';
+        this.selectionBox.style.zIndex = '1000';
+        this.selectionBox.style.left = `${this.selectionStart.x}px`;
+        this.selectionBox.style.top = `${this.selectionStart.y}px`;
+        this.selectionBox.style.width = '0px';
+        this.selectionBox.style.height = '0px';
+        
+        this.planView.appendChild(this.selectionBox);
+    }
+    
+    handleGlobalMouseMove(e) {
+        if (!this.isSelecting || !this.selectionBox) return;
+        
+        const rect = this.planView.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const currentY = e.clientY - rect.top;
+        
+        const left = Math.min(this.selectionStart.x, currentX);
+        const top = Math.min(this.selectionStart.y, currentY);
+        const width = Math.abs(currentX - this.selectionStart.x);
+        const height = Math.abs(currentY - this.selectionStart.y);
+        
+        this.selectionBox.style.left = `${left}px`;
+        this.selectionBox.style.top = `${top}px`;
+        this.selectionBox.style.width = `${width}px`;
+        this.selectionBox.style.height = `${height}px`;
+    }
+    
+    handleGlobalMouseUp(e) {
+        if (!this.isSelecting) return;
+        
+        this.finishSelection();
+        this.isSelecting = false;
+        
+        if (this.selectionBox) {
+            this.selectionBox.remove();
+            this.selectionBox = null;
+        }
+    }
+    
+    finishSelection() {
+        if (!this.selectionBox) return;
+        
+        const boxRect = this.selectionBox.getBoundingClientRect();
+        const planRect = this.planView.getBoundingClientRect();
+        
+        // Convert to plan view coordinates
+        const selectionRect = {
+            left: boxRect.left - planRect.left,
+            top: boxRect.top - planRect.top,
+            right: boxRect.right - planRect.left,
+            bottom: boxRect.bottom - planRect.top
+        };
+        
+        // Check which fixtures are within the selection box
+        this.planViewContent.querySelectorAll('.plan-fixture').forEach(fixture => {
+            const fixtureRect = fixture.getBoundingClientRect();
+            const fixtureCenter = {
+                x: fixtureRect.left + fixtureRect.width / 2 - planRect.left,
+                y: fixtureRect.top + fixtureRect.height / 2 - planRect.top
+            };
+            
+            // Check if fixture center is within selection box
+            if (fixtureCenter.x >= selectionRect.left && 
+                fixtureCenter.x <= selectionRect.right &&
+                fixtureCenter.y >= selectionRect.top && 
+                fixtureCenter.y <= selectionRect.bottom) {
+                
+                const patchId = parseInt(fixture.dataset.patchId);
+                this.selectFixture(patchId);
+            }
+        });
+        
+        this.updateSelectionVisuals();
+    }
+    
+    getCurrentPatchData() {
+        // Get current patch data from the event handler (PatchManager)
+        if (this.eventHandler && this.eventHandler.patchedDevices) {
+            return this.eventHandler.patchedDevices;
+        }
+        return [];
     }
 }
 

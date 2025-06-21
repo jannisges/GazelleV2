@@ -378,6 +378,13 @@ body {
     cursor: grabbing;
 }
 
+/* Selection box for drag-to-select */
+.selection-box {
+    pointer-events: none;
+    z-index: 1000;
+    box-sizing: border-box;
+}
+
 /* Channel Configuration */
 .channel-config {
     background: #f8f9fa;
