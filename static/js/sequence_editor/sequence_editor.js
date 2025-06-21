@@ -731,12 +731,14 @@ function seekToPosition(time) {
     playStartTime = Date.now();
     playStartPosition = currentPosition;
     
-    updatePlayheads(currentPosition);
     updatePositionDisplay(currentPosition);
     
-    // Update synchronized playheads
-    if (window.updateSynchronizedPlayhead) {
-        window.updateSynchronizedPlayhead(currentPosition);
+    // Update synchronized components directly
+    if (window.waveformRenderer) {
+        window.waveformRenderer.setCurrentTime(currentPosition);
+    }
+    if (window.sequenceEditor) {
+        window.sequenceEditor.setCurrentTime(currentPosition);
     }
     
     // If playing, seek without stopping playback
@@ -780,7 +782,7 @@ function handleFileUpload(input) {
     formData.append('file', file);
     
     // Show loading indicator
-    const uploadButton = document.querySelector('[onclick="openFileDialog()"]');
+    const uploadButton = document.getElementById('uploadAudioBtn');
     const originalText = uploadButton.innerHTML;
     uploadButton.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing...';
     uploadButton.disabled = true;
@@ -1064,8 +1066,15 @@ function stopSequence() {
             currentPosition = 0;
             stopPlaybackTracking();
             updatePlayButton();
-            updatePlayheads(0);
             updatePositionDisplay(0);
+            
+            // Update synchronized components directly
+            if (window.waveformRenderer) {
+                window.waveformRenderer.setCurrentTime(0);
+            }
+            if (window.sequenceEditor) {
+                window.sequenceEditor.setCurrentTime(0);
+            }
         }
     })
     .catch(error => console.error('Error stopping playback:', error));
@@ -1080,14 +1089,14 @@ function startPlaybackTracking() {
     playStartPosition = currentPosition;
     lastUIUpdate = 0;
     
-    // Start client-side playline updates (30fps for better performance)
+    // Start client-side playline updates
     playbackInterval = setInterval(() => {
         if (isPlaying) {
             updateClientPosition();
         } else {
             stopPlaybackTracking();
         }
-    }, 33); // ~30fps for better performance while maintaining smoothness
+    }, 16);
     
     // No server polling during playback - client-side only for smooth movement
 }
@@ -1117,12 +1126,14 @@ function updateClientPosition() {
     lastUIUpdate = now;
     
     // Update UI elements
-    updatePlayheads(currentPosition);
     updatePositionDisplay(currentPosition);
     
-    // Update synchronized playheads
-    if (window.updateSynchronizedPlayhead) {
-        window.updateSynchronizedPlayhead(currentPosition);
+    // Update synchronized components directly
+    if (window.waveformRenderer) {
+        window.waveformRenderer.setCurrentTime(currentPosition);
+    }
+    if (window.sequenceEditor) {
+        window.sequenceEditor.setCurrentTime(currentPosition);
     }
     
     // Set playing state for waveform renderer
@@ -1151,13 +1162,6 @@ function stopPlaybackTracking() {
     }
 }
 
-function updatePlayheads(time) {
-    if (!currentSong || currentSong.duration === 0) return;
-    
-    // The individual components (waveformRenderer and sequenceEditor) 
-    // now handle their own playheads via setCurrentTime()
-    // This function is kept for backward compatibility but may be removed later
-}
 
 function updatePositionDisplay(time) {
     document.getElementById('currentPosition').textContent = formatTime(time);

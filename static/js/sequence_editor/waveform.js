@@ -697,12 +697,3 @@ function setupTimelineSync() {
     });
 }
 
-// Update playhead on both timelines simultaneously
-function updateSynchronizedPlayhead(time) {
-    if (window.waveformRenderer) {
-        window.waveformRenderer.setCurrentTime(time);
-    }
-    if (window.sequenceEditor) {
-        window.sequenceEditor.setCurrentTime(time);
-    }
-}
