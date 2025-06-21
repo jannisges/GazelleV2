@@ -641,3 +641,537 @@ function deleteEventFromElement(eventId) {
         }
     }
 }
+
+// Main sequence editor application variables
+let currentSong = null;
+let currentSequence = { events: [] };
+let isExpanded = false;
+let patchedDevices = [];
+let isPlaying = false;
+let playbackInterval = null;
+let currentPosition = 0;
+let playStartTime = 0;
+let playStartPosition = 0;
+let lastUIUpdate = 0;
+
+// Initialize the application
+document.addEventListener('DOMContentLoaded', function() {
+    initializeWaveform();
+    initializeSequenceEditor();
+    loadPatchedDevices();
+    setupEventListeners();
+});
+
+function setupEventListeners() {
+    // Listen for waveform seek events
+    const waveformCanvas = document.getElementById('waveformCanvas');
+    if (waveformCanvas) {
+        waveformCanvas.addEventListener('waveform-seek', (e) => {
+            const seekTime = e.detail.time;
+            seekToPosition(seekTime);
+        });
+    }
+    
+    // Setup button event listeners
+    const uploadBtn = document.getElementById('uploadAudioBtn');
+    if (uploadBtn) {
+        uploadBtn.addEventListener('click', openFileDialog);
+    }
+    
+    const saveSequenceBtn = document.getElementById('saveSequenceBtn');
+    if (saveSequenceBtn) {
+        saveSequenceBtn.addEventListener('click', saveSequence);
+    }
+    
+    const toggleExpandBtn = document.getElementById('toggleExpandBtn');
+    if (toggleExpandBtn) {
+        toggleExpandBtn.addEventListener('click', toggleSequenceExpanded);
+    }
+    
+    const addEventBtn = document.getElementById('addEventBtn');
+    if (addEventBtn) {
+        addEventBtn.addEventListener('click', addSequenceEvent);
+    }
+    
+    const playPauseBtn = document.getElementById('playPauseButton');
+    if (playPauseBtn) {
+        playPauseBtn.addEventListener('click', playSequence);
+    }
+    
+    const stopBtn = document.getElementById('stopBtn');
+    if (stopBtn) {
+        stopBtn.addEventListener('click', stopSequence);
+    }
+    
+    const saveEventBtn = document.getElementById('saveEventBtn');
+    if (saveEventBtn) {
+        saveEventBtn.addEventListener('click', saveEvent);
+    }
+    
+    const eventTypeSelect = document.getElementById('eventType');
+    if (eventTypeSelect) {
+        eventTypeSelect.addEventListener('change', updateEventFields);
+    }
+    
+    const audioFileInput = document.getElementById('audioFileInput');
+    if (audioFileInput) {
+        audioFileInput.addEventListener('change', function() {
+            handleFileUpload(this);
+        });
+    }
+    
+    console.log('Event listeners setup complete');
+}
+
+function seekToPosition(time) {
+    console.log('Seeking to position:', time);
+    currentPosition = Math.max(0, time);
+    
+    // Reset client-side tracking variables
+    playStartTime = Date.now();
+    playStartPosition = currentPosition;
+    
+    updatePlayheads(currentPosition);
+    updatePositionDisplay(currentPosition);
+    
+    // Update synchronized playheads
+    if (window.updateSynchronizedPlayhead) {
+        window.updateSynchronizedPlayhead(currentPosition);
+    }
+    
+    // If playing, seek without stopping playback
+    if (isPlaying) {
+        console.log('Seeking during playback to position:', time);
+        
+        // Send seek request to backend
+        fetch('/api/seek-sequence', { 
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ position: currentPosition })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                console.log('Seeked successfully during playback');
+                // Reset tracking to sync with new position
+                playStartTime = Date.now();
+                playStartPosition = currentPosition;
+            } else {
+                console.error('Seek failed:', data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error seeking during playback:', error);
+        });
+    }
+}
+
+function openFileDialog() {
+    document.getElementById('audioFileInput').click();
+}
+
+function handleFileUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    // Show loading indicator
+    const uploadButton = document.querySelector('[onclick="openFileDialog()"]');
+    const originalText = uploadButton.innerHTML;
+    uploadButton.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing...';
+    uploadButton.disabled = true;
+    
+    fetch('/api/upload-song', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Upload response:', data);
+        if (data.error) {
+            alert('Error: ' + data.error);
+            return;
+        }
+        
+        currentSong = data;
+        console.log('Current song set:', currentSong);
+        updateSongInfo();
+        console.log('Calling renderWaveform with:', data.waveform_data);
+        renderWaveform(data.waveform_data, data.duration);
+        updateTimeline();
+        alert('File uploaded and processed successfully!');
+    })
+    .catch(error => {
+        console.error('Error uploading file:', error);
+        alert('Error uploading file: ' + error.message);
+    })
+    .finally(() => {
+        // Restore upload button
+        uploadButton.innerHTML = originalText;
+        uploadButton.disabled = false;
+    });
+}
+
+function updateSongInfo() {
+    if (!currentSong) return;
+    
+    document.getElementById('songName').textContent = currentSong.name;
+    document.getElementById('songDuration').textContent = `Duration: ${formatTime(currentSong.duration)}`;
+    document.getElementById('totalDuration').textContent = formatTime(currentSong.duration);
+    document.getElementById('songInfo').style.display = 'block';
+    
+    // Update sequence editor duration
+    if (window.sequenceEditor) {
+        window.sequenceEditor.setDuration(currentSong.duration);
+    }
+}
+
+function formatTime(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+function toggleSequenceExpanded() {
+    isExpanded = !isExpanded;
+    if (window.sequenceEditor) {
+        window.sequenceEditor.setExpanded(isExpanded);
+    }
+}
+
+function updateDeviceList() {
+    // Update device list in event modal
+    const deviceList = document.getElementById('deviceList');
+    if (deviceList) {
+        deviceList.innerHTML = '';
+        patchedDevices.forEach(patch => {
+            const checkbox = document.createElement('div');
+            checkbox.className = 'form-check';
+            checkbox.innerHTML = `
+                <input class="form-check-input" type="checkbox" value="${patch.id}" id="device_${patch.id}">
+                <label class="form-check-label" for="device_${patch.id}">
+                    ${patch.device.name} (DMX: ${patch.start_address})
+                </label>
+            `;
+            deviceList.appendChild(checkbox);
+        });
+    }
+}
+
+function loadPatchedDevices() {
+    fetch('/api/patched-devices')
+        .then(response => response.json())
+        .then(data => {
+            patchedDevices = data;
+            updateDeviceList();
+        })
+        .catch(error => console.error('Error loading patched devices:', error));
+}
+
+function addSequenceEvent() {
+    const modal = new bootstrap.Modal(document.getElementById('eventModal'));
+    modal.show();
+}
+
+function updateEventFields() {
+    const eventType = document.getElementById('eventType').value;
+    const fieldsContainer = document.getElementById('eventFields');
+    
+    switch(eventType) {
+        case 'dimmer':
+            fieldsContainer.innerHTML = `
+                <div class="mb-3">
+                    <label class="form-label">Dimmer Value (%)</label>
+                    <input type="range" class="form-range" id="dimmerValue" min="0" max="100" value="100">
+                    <div class="d-flex justify-content-between">
+                        <small>0%</small>
+                        <small>100%</small>
+                    </div>
+                </div>
+            `;
+            break;
+        case 'color':
+            fieldsContainer.innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <label class="form-label">Color</label>
+                        <input type="color" class="form-control form-control-color" id="colorValue" value="#ffffff">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">White</label>
+                        <input type="range" class="form-range" id="whiteValue" min="0" max="255" value="0">
+                    </div>
+                </div>
+            `;
+            break;
+        case 'position':
+            fieldsContainer.innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <label class="form-label">Pan</label>
+                        <input type="range" class="form-range" id="panValue" min="0" max="255" value="128">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Tilt</label>
+                        <input type="range" class="form-range" id="tiltValue" min="0" max="255" value="128">
+                    </div>
+                </div>
+            `;
+            break;
+    }
+}
+
+function saveEvent() {
+    // Implementation for saving events
+    const modal = bootstrap.Modal.getInstance(document.getElementById('eventModal'));
+    modal.hide();
+}
+
+function saveSequence() {
+    if (!currentSong) {
+        alert('Please load a song first');
+        return;
+    }
+    
+    const sequenceName = prompt('Enter sequence name:');
+    if (!sequenceName) return;
+    
+    const sequenceData = {
+        song_id: currentSong.id,
+        name: sequenceName,
+        events: currentSequence.events
+    };
+    
+    fetch('/api/save-sequence', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(sequenceData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            alert('Sequence saved successfully!');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving sequence:', error);
+        alert('Error saving sequence');
+    });
+}
+
+function playSequence() {
+    if (!currentSong) {
+        alert('Please load a song first');
+        return;
+    }
+    
+    if (!isPlaying) {
+        console.log('Starting playback from position:', currentPosition);
+        // Start playing from current position
+        fetch('/api/play-sequence', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                song_id: currentSong.id,
+                events: currentSequence.events,
+                start_time: currentPosition
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Play response:', data);
+            if (data.success) {
+                isPlaying = true;
+                updatePlayButton();
+                // Get initial server position for accurate tracking
+                fetch('/api/playback-status')
+                .then(response => response.json())
+                .then(statusData => {
+                    if (statusData.is_playing && statusData.current_time !== undefined) {
+                        syncWithServerPosition(statusData.current_time);
+                    }
+                    startPlaybackTracking();
+                })
+                .catch(() => {
+                    // Fallback to client position if server check fails
+                    playStartTime = Date.now();
+                    playStartPosition = currentPosition;
+                    startPlaybackTracking();
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Error starting playback:', error);
+            alert('Error starting playback: ' + error.message);
+        });
+    } else {
+        // Resume playing
+        console.log('Resuming playback');
+        fetch('/api/resume-sequence', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Resume response:', data);
+            if (data.success) {
+                isPlaying = true;
+                updatePlayButton();
+                // Resume from current client position (no server sync needed)
+                playStartTime = Date.now();
+                playStartPosition = currentPosition;
+                startPlaybackTracking();
+            }
+        })
+        .catch(error => {
+            console.error('Error resuming playback:', error);
+            alert('Error resuming playback: ' + error.message);
+        });
+    }
+}
+
+function pauseSequence() {
+    fetch('/api/pause-sequence', { method: 'POST' })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            isPlaying = false;
+            stopPlaybackTracking();
+            updatePlayButton();
+        }
+    })
+    .catch(error => console.error('Error pausing playback:', error));
+}
+
+function stopSequence() {
+    fetch('/api/stop-sequence', { method: 'POST' })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            isPlaying = false;
+            currentPosition = 0;
+            stopPlaybackTracking();
+            updatePlayButton();
+            updatePlayheads(0);
+            updatePositionDisplay(0);
+        }
+    })
+    .catch(error => console.error('Error stopping playback:', error));
+}
+
+function startPlaybackTracking() {
+    stopPlaybackTracking(); // Clear any existing intervals
+    console.log('Starting playback tracking');
+    
+    // Record the start time for smooth client-side tracking
+    playStartTime = Date.now();
+    playStartPosition = currentPosition;
+    lastUIUpdate = 0;
+    
+    // Start client-side playline updates (30fps for better performance)
+    playbackInterval = setInterval(() => {
+        if (isPlaying) {
+            updateClientPosition();
+        } else {
+            stopPlaybackTracking();
+        }
+    }, 33); // ~30fps for better performance while maintaining smoothness
+    
+    // No server polling during playback - client-side only for smooth movement
+}
+
+function updateClientPosition() {
+    if (!isPlaying) return;
+    
+    // Calculate current position based on elapsed time since play started
+    const elapsedMs = Date.now() - playStartTime;
+    const elapsedSeconds = elapsedMs / 1000;
+    currentPosition = playStartPosition + elapsedSeconds;
+    
+    // Stop if we've reached the end
+    if (currentSong && currentPosition >= currentSong.duration) {
+        currentPosition = currentSong.duration;
+        isPlaying = false;
+        stopPlaybackTracking();
+        updatePlayButton();
+        return;
+    }
+    
+    // Throttle UI updates to reduce load (max 20fps for UI updates)
+    const now = Date.now();
+    if (now - lastUIUpdate < 50) {
+        return; // Skip this update cycle
+    }
+    lastUIUpdate = now;
+    
+    // Update UI elements
+    updatePlayheads(currentPosition);
+    updatePositionDisplay(currentPosition);
+    
+    // Update synchronized playheads
+    if (window.updateSynchronizedPlayhead) {
+        window.updateSynchronizedPlayhead(currentPosition);
+    }
+    
+    // Set playing state for waveform renderer
+    if (window.waveformRenderer) {
+        window.waveformRenderer.setPlaying(true);
+    }
+}
+
+function syncWithServerPosition(serverPosition) {
+    currentPosition = serverPosition;
+    playStartTime = Date.now();
+    playStartPosition = serverPosition;
+    
+    console.log('Synced client position to server:', serverPosition);
+}
+
+function stopPlaybackTracking() {
+    if (playbackInterval) {
+        clearInterval(playbackInterval);
+        playbackInterval = null;
+    }
+    
+    // Stop waveform animation
+    if (window.waveformRenderer) {
+        window.waveformRenderer.setPlaying(false);
+    }
+}
+
+function updatePlayheads(time) {
+    if (!currentSong || currentSong.duration === 0) return;
+    
+    // The individual components (waveformRenderer and sequenceEditor) 
+    // now handle their own playheads via setCurrentTime()
+    // This function is kept for backward compatibility but may be removed later
+}
+
+function updatePositionDisplay(time) {
+    document.getElementById('currentPosition').textContent = formatTime(time);
+}
+
+function updatePlayButton() {
+    const playButton = document.getElementById('playPauseButton');
+    if (playButton) {
+        if (isPlaying) {
+            playButton.innerHTML = '<i class="bi bi-pause"></i> Pause';
+            playButton.onclick = pauseSequence;
+        } else {
+            playButton.innerHTML = '<i class="bi bi-play"></i> Play';
+            playButton.onclick = playSequence;
+        }
+    }
+}
