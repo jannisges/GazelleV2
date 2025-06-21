@@ -48,7 +48,11 @@ GazelleV2/
 │     └── light_preview/
 │       └── light_preview.js
 │     └── patch/
-│       └── patch.js
+│       ├── api-client.js               # API communication for patch operations
+│       ├── selection-manager.js        # Device selection and multi-select operations
+│       ├── grid-manager.js             # DMX address grid display and interactions
+│       ├── plan-view-controller.js     # 2D plan view with zoom, pan, and grid functionality
+│       └── patch-manager.js            # Main patch manager coordinating all components
 │     └── sequence_editor/
 │       ├── waveform.js
 │       ├── sequence-editor-core.js      # Core timeline visualization

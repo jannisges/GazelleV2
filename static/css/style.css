@@ -462,6 +462,11 @@ body {
 }
 
 /* Playlist Management */
+.playlist-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
 .playlist-container {
     background: #f8f9fa;
     border: 1px solid #dee2e6;
@@ -1323,4 +1328,15 @@ body {
 .sequence-expanded {
     height: auto;
     min-height: 150px;
+}
+
+/* Modal sequence selectors */
+.sequence-selector {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.available-sequences {
+    max-height: 300px;
+    overflow-y: auto;
 }

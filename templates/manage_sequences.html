@@ -73,7 +73,7 @@
                 </button>
             </div>
             <div class="card-body">
-                <div class="playlist-list custom-scrollbar" style="max-height: 400px; overflow-y: auto;">
+                <div class="playlist-list custom-scrollbar">
                     {% for playlist in playlists %}
                     <div class="playlist-container">
                         <div class="playlist-header">
@@ -196,7 +196,7 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Select Sequences</label>
-                        <div id="sequenceSelector" style="max-height: 200px; overflow-y: auto;">
+                        <div id="sequenceSelector" class="sequence-selector">
                             {% for sequence in sequences %}
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" value="{{ sequence.id }}" id="seq_{{ sequence.id }}">
@@ -243,7 +243,7 @@
             </div>
             <div class="modal-body">
                 <input type="hidden" id="targetPlaylistId">
-                <div id="availableSequences" style="max-height: 300px; overflow-y: auto;">
+                <div id="availableSequences" class="available-sequences">
                     {% for sequence in sequences %}
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" value="{{ sequence.id }}" id="add_seq_{{ sequence.id }}">

@@ -151,11 +151,16 @@
 
 {% block scripts %}
 <script>
-    // Make patched devices data available globally for the patch.js module
+    // Make patched devices data available globally for the patch modules
     const patchedDevices = JSON.parse('{{ patched_devices | tojson | safe  }}');
     
     // PatchManager will handle all grid generation and event management
 </script>
-<script src="{{ url_for('static', filename='js/patch/patch.js') }}"></script>
+<!-- Load patch modules in dependency order -->
+<script src="{{ url_for('static', filename='js/patch/api-client.js') }}"></script>
+<script src="{{ url_for('static', filename='js/patch/selection-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='js/patch/grid-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='js/patch/plan-view-controller.js') }}"></script>
+<script src="{{ url_for('static', filename='js/patch/patch-manager.js') }}"></script>
 {% endblock %}
 </html>
