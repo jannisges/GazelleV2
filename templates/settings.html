@@ -63,7 +63,7 @@
                 <label for="webPassword" class="form-label">Web Interface Password</label>
                 <div class="input-group">
                     <input type="password" class="form-control" id="webPassword" placeholder="Enter new password">
-                    <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility()">
+                    <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility()" title="Show or hide password">
                         <i class="bi bi-eye" id="passwordToggleIcon"></i>
                     </button>
                 </div>
@@ -246,7 +246,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Connect to WiFi</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <p>Enter password for network: <strong id="selectedSSID"></strong></p>
@@ -269,7 +269,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Add Custom WiFi Network</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="mb-3">
@@ -304,7 +304,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Import Settings</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="mb-3">

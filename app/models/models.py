@@ -8,7 +8,7 @@ class Device(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     channels = db.Column(db.Text)  # JSON string
-    shape = db.Column(db.String(20), default='circle')  # circle, square, triangle
+    shape = db.Column(db.String(20), default='circle')  # circle, square
     color = db.Column(db.String(7), default='#ffffff')  # hex color for outline
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     

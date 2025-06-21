@@ -227,6 +227,7 @@ body {
     position: relative;
     overflow: hidden;
     cursor: crosshair;
+    -webkit-user-select: none;
     user-select: none;
 }
 
@@ -283,6 +284,7 @@ body {
     background: rgba(0, 0, 0, 0.7);
     border: 1px solid rgba(255, 255, 255, 0.3);
     color: white;
+    -webkit-backdrop-filter: blur(5px);
     backdrop-filter: blur(5px);
 }
 
@@ -700,7 +702,7 @@ body {
 /* Custom Scrollbars */
 .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: #6c757d #f8f9fa;
+    scrollbar-color: #6c757d #f8f9fa; /* For Firefox */
 }
 
 .custom-scrollbar::-webkit-scrollbar {

@@ -107,7 +107,7 @@
                                     <br>
                                     <small class="text-muted">{{ seq.song.name }}</small>
                                 </div>
-                                <button class="btn btn-sm btn-outline-danger" onclick="removeFromPlaylist({{ playlist.id }}, {{ seq.id }})">
+                                <button class="btn btn-sm btn-outline-danger" onclick="removeFromPlaylist({{ playlist.id }}, {{ seq.id }})" aria-label="Remove sequence from playlist">
                                     <i class="bi bi-x"></i>
                                 </button>
                             </div>
@@ -185,7 +185,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="playlistModalTitle">Create Playlist</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <form id="playlistForm">
@@ -239,7 +239,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Add Sequences to Playlist</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="targetPlaylistId">
@@ -268,7 +268,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Import Sequence</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="mb-3">

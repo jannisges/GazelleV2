@@ -187,13 +187,13 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Add Sequence Event</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="Close"></button>
             </div>
             <div class="modal-body">
                 <form id="eventForm">
                     <div class="mb-3">
                         <label class="form-label">Time (seconds)</label>
-                        <input type="number" class="form-control" id="eventTime" min="0" step="0.1" required>
+                        <input type="number" class="form-control" id="eventTime" min="0" step="0.1" required placeholder="Enter time in seconds" title="Time in seconds">
                     </div>
                     
                     <div class="mb-3">
@@ -204,8 +204,8 @@
                     </div>
                     
                     <div class="mb-3">
-                        <label class="form-label">Event Type</label>
-                        <select class="form-select" id="eventType" onchange="updateEventFields()">
+                        <label class="form-label" for="eventType">Event Type</label>
+                        <select class="form-select" id="eventType" onchange="updateEventFields()" title="Event Type">
                             <option value="dimmer">Dimmer</option>
                             <option value="color">Color</option>
                             <option value="position">Position</option>

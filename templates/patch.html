@@ -98,7 +98,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Device Information</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="Close" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div id="deviceInfoContent">
@@ -119,18 +119,18 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Edit Position</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="Close" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <form id="positionForm">
                     <div class="row">
                         <div class="col-md-6">
                             <label class="form-label">X Position</label>
-                            <input type="number" class="form-control" id="positionX" step="1">
+                            <input type="number" class="form-control" id="positionX" step="1" placeholder="Enter X position" title="X Position">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Y Position</label>
-                            <input type="number" class="form-control" id="positionY" step="1">
+                            <input type="number" class="form-control" id="positionY" step="1" placeholder="Enter Y position" title="Y Position">
                         </div>
                     </div>
                     <div class="mt-3">
@@ -152,9 +152,10 @@
 {% block scripts %}
 <script>
     // Make patched devices data available globally for the patch.js module
-    const patchedDevices = {{ patched_devices | tojson }};
+    const patchedDevices = JSON.parse('{{ patched_devices | tojson | safe  }}');
     
     // PatchManager will handle all grid generation and event management
 </script>
 <script src="{{ url_for('static', filename='js/patch.js') }}"></script>
 {% endblock %}
+</html>
