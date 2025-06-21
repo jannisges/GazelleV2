@@ -2,134 +2,115 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
-
-This is a web-based DMX lighting control system designed for Raspberry Pi that synchronizes lighting sequences with music. The application creates professional light shows with precise timing control and real-time DMX512 output.
-
 ## Development Commands
 
 ### Running the Application
 ```bash
-# Development mode (auto-detects hardware availability)
+# Development mode
 python3 app.py
 
-# With virtual environment
-source venv/bin/activate
-python3 app.py
-```
-
-### System Service Management
-```bash
-# Control the installed service
+# Production mode (with systemd service)
 sudo systemctl start dmx-control.service
-sudo systemctl stop dmx-control.service
 sudo systemctl status dmx-control.service
-sudo journalctl -u dmx-control.service -f
 ```
 
-### Hardware Testing
+### Environment Setup
 ```bash
-# Test GPIO button (Raspberry Pi only)
-python3 test_button.py
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # Linux/Mac
+# venv\Scripts\activate   # Windows
 
-# Test DMX output (Raspberry Pi only)
-python3 test_dmx.py
-```
-
-### Installation
-```bash
-# Complete system setup (Raspberry Pi)
-./install.sh
-
-# Manual Python dependencies
+# Install dependencies
 pip install -r requirements.txt
+
+# Initialize database
+python3 app.py  # Creates tables on first run
 ```
+
+### Database Operations
+- Database is SQLite stored as `dmx_control.db`
+- Flask-SQLAlchemy handles ORM and migrations
+- Schema auto-created on first run via `db.create_all()` in app.py:113
 
 ## Architecture Overview
 
-### Core Components
+### Core Application Structure
+- **Flask app** (`app.py`) - Main application entry point with route definitions
+- **MVC Pattern** - Models, API controllers, and HTML templates
+- **Hardware Abstraction** - Raspberry Pi GPIO and DMX output with fallback simulation
+- **Real-time Systems** - Threading for DMX output (~25 FPS) and button handling
 
-**Flask Application (`app.py`)**
-- Main web server and API endpoints
-- SQLAlchemy database models for devices, sequences, playlists
-- Hardware abstraction layer for GPIO/DMX output
-- Audio playback synchronization engine
+### Key Components
 
-**Hardware Controllers**
-- `DMXController`: Real-time DMX512 signal generation via GPIO14
-- `AudioPlayer`: pygame-based audio playback with position tracking  
-- GPIO button handler on pin 18 for hardware triggers
+#### Database Models (`app/models/models.py`)
+- `Device` - DMX device definitions with channel configurations (JSON stored)
+- `PatchedDevice` - Device instances mapped to DMX addresses with 2D positions
+- `Song` - Audio files with waveform data and metadata
+- `Sequence` - Lighting sequences linked to songs with event data (JSON stored)
+- `Playlist` - Collections of sequences for automated playback
 
-**Database Models**
-- `Device`: Lighting fixture definitions with channel configurations
-- `PatchedDevice`: DMX address assignments and 2D positioning
-- `Song`: Audio files with waveform data for visualization
-- `Sequence`: Lighting events synchronized to audio timeline
-- `Playlist`: Collections of sequences for automated playback
+#### Hardware Controllers (`app/hardware/hardware.py`)
+- `DMXController` - Threaded DMX512 output via GPIO14 (or simulation)
+- `AudioPlayer` - Pygame-based audio playback with synchronization
+- GPIO handling with `RPI_AVAILABLE` flag for cross-platform development
 
-### Frontend Structure
+#### Business Logic (`app/services/`)
+- `playback.py` - Sequence playback coordination and hardware button handling
+- `audio_processing.py` - Audio file analysis and waveform generation using librosa
 
-**Templates (Jinja2)**
-- `base.html`: Bootstrap navigation and layout
-- `index.html`: Main sequencer interface with waveform editor
-- `patch.html`: DMX patching and 2D fixture positioning
-- `create_device.html`: Device configuration with channel types
-- `manage_sequences.html`: Sequence and playlist management
+#### API Endpoints (`app/api/`)
+- `device_api.py` - Device CRUD and management
+- `sequence_api.py` - Sequence and playlist operations
+- `playback_api.py` - Real-time playback control
+- `network_api.py` - WiFi and network management (Raspberry Pi specific)
+- `system_api.py` - System settings and administrative functions
 
-**JavaScript Modules**
-- `main.js`: Core utilities and drag-and-drop functionality
-- `waveform.js`: Audio visualization and timeline controls
-- `sequence-editor.js`: Event editing and playback synchronization
-- `light-preview.js`: 2D fixture visualization and real-time preview
+### Frontend Architecture
+- **Vanilla JavaScript** - No frameworks, modular JS files per page
+- **Canvas-based Visualizations** - Waveform rendering and 2D fixture positioning
+- **Real-time Updates** - WebSocket-like polling for playback status
+- **Drag & Drop** - Device patching interface with visual feedback
 
 ### Hardware Integration
+- **DMX Output** - GPIO14 via MAX485E RS-485 transceiver
+- **Button Input** - GPIO18 with pull-up resistor for sequence triggering
+- **Cross-platform** - Automatic hardware detection with simulation fallback
 
-**DMX Output**
-- Professional DMX512 protocol via MAX485E transceiver
-- 512-channel universe with 25fps refresh rate
-- Hardware abstraction with development mode fallback
+### Data Flow
+1. Audio files uploaded → librosa analysis → waveform data stored
+2. Devices created → patched to DMX addresses → positioned in 2D space
+3. Sequences created → events timed to audio → stored as JSON
+4. Playback triggered → audio starts → DMX values interpolated → GPIO output
 
-**GPIO Interface**
-- Button trigger on GPIO18 for show automation
-- Automatic hardware detection with graceful fallbacks
-- Service-based auto-start configuration
+### Threading Model
+- **Main Thread** - Flask web server
+- **DMX Thread** - Continuous 25 FPS DMX frame output
+- **Button Thread** - Hardware button monitoring (Raspberry Pi only)
+- **Playback Thread** - Sequence event scheduling and interpolation
 
-## Key Technical Details
+## Development Notes
 
-### Audio Processing
-- librosa for waveform analysis and duration detection
-- pygame mixer for precise playback control
-- Real-time position tracking for sequence synchronization
+### Testing Without Hardware
+- Application detects `RPI_AVAILABLE` flag and falls back to console simulation
+- All web interface features work in development mode
+- DMX output prints to console instead of GPIO
 
-### Database Schema
-- SQLite with SQLAlchemy ORM
-- JSON fields for flexible channel and event storage
-- Foreign key relationships for data integrity
+### Key File Locations
+- Main application: `app.py`
+- Database models: `app/models/models.py`
+- Hardware controllers: `app/hardware/hardware.py`
+- Frontend JS modules: `static/js/[page]/[page].js`
+- HTML templates: `templates/[page].html`
 
-### Hardware Timing
-- DMX refresh at 25fps (40ms intervals)
-- Sequence events processed at 10ms precision
-- Threading for concurrent audio and DMX operation
+### Audio File Handling
+- Supported formats: MP3, WAV, FLAC, AIFF
+- Storage location: `uploads/` directory
+- Max file size: 150MB (configured in app.py:24)
+- Waveform analysis: librosa with scipy compatibility fixes (app.py:11-16)
 
-### Development Environment
-- Automatic hardware detection (RPi.GPIO availability)
-- Mock hardware modes for development on non-Pi systems
-- Bootstrap 5 responsive web interface
-
-## File Organization
-
-- `/templates/`: Jinja2 HTML templates
-- `/static/css/`: Styling and responsive design
-- `/static/js/`: Client-side application logic  
-- `/uploads/`: Audio file storage (auto-created)
-- `/backups/`: Automated system backups
-- `test_*.py`: Hardware validation scripts
-- `install.sh`: Complete Raspberry Pi setup automation
-
-## Development Troubleshooting
-
-- You can't run the current project because the venv is a windows venv.
-
-## Development Guidelines
-
-- Ask questions to make sure you understand everything correctly before you start editing the code. Only start editing the code when I write "SC" in capslock at the end of a message. SC stands for Start Coding.
+### DMX Implementation
+- 512 channels, 8-bit values (0-255)
+- Channel addressing: 1-based indexing
+- Frame rate: ~25 FPS continuous output
+- Protocol: DMX512 standard via RS-485

@@ -127,5 +127,9 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/sequence_editor/waveform.js') }}"></script>
-<script src="{{ url_for('static', filename='js/sequence_editor/sequence_editor.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sequence_editor/sequence-editor-core.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sequence_editor/event-modal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sequence_editor/playback-controller.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sequence_editor/ui-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sequence_editor/sequence-editor-main.js') }}"></script>
 {% endblock %}
