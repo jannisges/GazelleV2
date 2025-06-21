@@ -59,6 +59,11 @@ def audio_preview(song_id):
 # Basic page routes
 @app.route('/')
 def index():
+    from flask import redirect, url_for
+    return redirect(url_for('manage_sequences'))
+
+@app.route('/sequence_editor')
+def sequence_editor():
     from flask import render_template
     return render_template('index.html')
 

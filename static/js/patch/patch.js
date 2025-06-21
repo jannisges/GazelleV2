@@ -465,6 +465,7 @@ class PlanViewController {
         this.draggedFixture = null;
         this.dragOffset = { x: 0, y: 0 };
         this.planViewRect = null;
+        this.justFinishedDrag = false;
     }
     
     initialize() {
@@ -524,10 +525,21 @@ class PlanViewController {
         fixture.style.top = `${centerY + y}px`;
         
         // Add event listeners
-        fixture.addEventListener('click', () => this.showDeviceInfo(patch));
+        fixture.addEventListener('click', (e) => this.handleFixtureClick(e, patch));
         fixture.addEventListener('mousedown', (e) => this.startDragFixture(e, patch));
         
         this.planViewContent.appendChild(fixture);
+    }
+    
+    handleFixtureClick(e, patch) {
+        // Don't show device info if we just finished dragging
+        if (this.justFinishedDrag) {
+            this.justFinishedDrag = false;
+            return;
+        }
+        
+        // Device Information modal should never open from 2D Plan View
+        // This functionality is intentionally disabled
     }
     
     startDragFixture(e, patch) {
@@ -580,6 +592,7 @@ class PlanViewController {
         
         this.isDraggingFixture = false;
         this.draggedFixture.classList.remove('dragging', 'snapped');
+        this.justFinishedDrag = true;
         
         const rect = this.planView.getBoundingClientRect();
         const centerX = rect.width / 2;
@@ -855,10 +868,10 @@ class PatchManager {
         console.log('Loaded patched devices:', this.patchedDevices.length);
         this.gridManager.generateGrid();
         console.log('DMX grid generated');
-        this.updatePatchDisplay();
-        console.log('Patch display updated');
         this.planViewController.initialize();
         console.log('Plan view initialized');
+        this.updatePatchDisplay();
+        console.log('Patch display updated');
         this.setupEventListeners();
         console.log('Event listeners set up');
         console.log('Patch components initialized');

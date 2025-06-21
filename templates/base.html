@@ -21,8 +21,13 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">
-                            <i class="bi bi-house"></i> Main
+                        <a class="nav-link {% if request.endpoint == 'manage_sequences' %}active{% endif %}" href="{{ url_for('manage_sequences') }}">
+                            <i class="bi bi-music-note-list"></i> Sequences
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'sequence_editor' %}active{% endif %}" href="{{ url_for('sequence_editor') }}">
+                            <i class="bi bi-pencil-square"></i> Sequence Editor
                         </a>
                     </li>
                     <li class="nav-item">
@@ -33,11 +38,6 @@
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'create_device' %}active{% endif %}" href="{{ url_for('create_device') }}">
                             <i class="bi bi-plus-circle"></i> Create Device
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'manage_sequences' %}active{% endif %}" href="{{ url_for('manage_sequences') }}">
-                            <i class="bi bi-music-note-list"></i> Sequences
                         </a>
                     </li>
                     <li class="nav-item">
