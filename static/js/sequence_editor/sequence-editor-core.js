@@ -11,6 +11,18 @@ class SequenceEditor {
         this.isExpanded = false;
         this.tracks = [];
         this.currentTime = 0;
+        this.needsFullRender = true;
+        this.isPlaying = false;
+        
+        // Performance optimizations
+        this.eventElements = new Map(); // Cache DOM elements by event ID
+        this.trackElements = new Map(); // Cache track elements
+        this.lastRenderParams = null;
+        this.animationFrameId = null;
+        
+        // Virtual scrolling parameters
+        this.visibleEvents = new Set();
+        this.eventPool = [];
         
         this.setupPlayheadOverlay();
         this.setupEventListeners();
@@ -63,21 +75,47 @@ class SequenceEditor {
     }
     
     setupZoomAndScroll() {
+        // Throttle wheel zoom events
+        let wheelTimeout = null;
         this.container.addEventListener('wheel', (e) => {
             e.preventDefault();
-            const rect = this.container.getBoundingClientRect();
-            const mouseX = (e.clientX - rect.left) / rect.width;
             
-            const zoomFactor = e.deltaY > 0 ? 0.8 : 1.25;
-            const newZoomLevel = Math.max(1, Math.min(100, this.zoomLevel * zoomFactor));
-            
-            if (newZoomLevel !== this.zoomLevel) {
-                const zoomChange = newZoomLevel / this.zoomLevel;
-                const newScrollPosition = Math.max(0, Math.min(1 - 1/newZoomLevel, 
-                    this.scrollPosition + mouseX * (1 - 1/zoomChange) / newZoomLevel));
-                this.scrollPosition = newScrollPosition;
-                this.setZoomLevel(newZoomLevel);
+            // Clear previous timeout
+            if (wheelTimeout) {
+                clearTimeout(wheelTimeout);
             }
+            
+            // Throttle to 16ms (60 FPS)
+            wheelTimeout = setTimeout(() => {
+                const rect = this.container.getBoundingClientRect();
+                const mouseX = (e.clientX - rect.left) / rect.width;
+                
+                const zoomFactor = e.deltaY > 0 ? 0.8 : 1.25;
+                const newZoomLevel = Math.max(1, Math.min(100, this.zoomLevel * zoomFactor));
+                
+                if (newZoomLevel !== this.zoomLevel) {
+                    // Calculate the time at mouse position before zoom
+                    const mouseTime = this.pixelToTime((e.clientX - rect.left));
+                    
+                    // Update zoom level first
+                    this.zoomLevel = newZoomLevel;
+                    
+                    // Calculate new scroll position to keep mouse time at same pixel
+                    const visibleDuration = this.duration / this.zoomLevel;
+                    const targetTime = mouseTime - (mouseX * visibleDuration);
+                    const maxScroll = Math.max(0, this.duration - visibleDuration);
+                    const newScrollPosition = maxScroll > 0 ? Math.max(0, Math.min(1, targetTime / maxScroll)) : 0;
+                    
+                    this.scrollPosition = newScrollPosition;
+                    this.scheduleRender();
+                    
+                    // Dispatch zoom change event for synchronization
+                    const event = new CustomEvent('sequence-zoom-change', { 
+                        detail: { zoomLevel: this.zoomLevel, scrollPosition: this.scrollPosition } 
+                    });
+                    this.container.dispatchEvent(event);
+                }
+            }, 16);
         });
         
         this.setupDragScroll();
@@ -95,21 +133,32 @@ class SequenceEditor {
             }
         });
         
+        // Throttle drag scroll events
+        let dragTimeout = null;
         this.container.addEventListener('mousemove', (e) => {
             if (isDragging) {
-                const deltaX = e.clientX - lastX;
-                const scrollDelta = -(deltaX / this.container.clientWidth) * (1 / this.zoomLevel);
-                const newScrollPosition = Math.max(0, Math.min(1 - 1/this.zoomLevel, 
-                    this.scrollPosition + scrollDelta));
-                
-                if (newScrollPosition !== this.scrollPosition) {
-                    this.scrollPosition = newScrollPosition;
-                    lastX = e.clientX;
-                    this.render();
-                    this.updateMarkers();
-                    this.updatePlayhead();
-                    this.dispatchScrollEvent();
+                // Clear previous timeout
+                if (dragTimeout) {
+                    clearTimeout(dragTimeout);
                 }
+                
+                // Throttle to 16ms (60 FPS)
+                dragTimeout = setTimeout(() => {
+                    const deltaX = e.clientX - lastX;
+                    const scrollDelta = -(deltaX / this.container.clientWidth) * (1 / this.zoomLevel);
+                    const maxScrollPosition = this.zoomLevel > 1 ? 1 : 0;
+                    const newScrollPosition = Math.max(0, Math.min(maxScrollPosition, 
+                        this.scrollPosition + scrollDelta));
+                    
+                    if (newScrollPosition !== this.scrollPosition) {
+                        this.scrollPosition = newScrollPosition;
+                        lastX = e.clientX;
+                        this.scheduleRender();
+                        this.updateMarkers();
+                        this.updatePlayhead();
+                        this.dispatchScrollEvent();
+                    }
+                }, 16);
             }
         });
         
@@ -124,10 +173,51 @@ class SequenceEditor {
         });
     }
     
+    scheduleRender() {
+        // Use requestAnimationFrame to batch render operations
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+        }
+        
+        this.animationFrameId = requestAnimationFrame(() => {
+            this.render();
+            this.animationFrameId = null;
+        });
+    }
+    
+    shouldFullRender() {
+        // Check if a full re-render is needed based on current parameters
+        const currentParams = {
+            zoomLevel: this.zoomLevel,
+            scrollPosition: this.scrollPosition,
+            duration: this.duration,
+            eventsCount: this.events.length,
+            isExpanded: this.isExpanded,
+            containerWidth: this.container.clientWidth,
+            containerHeight: this.container.clientHeight
+        };
+        
+        if (!this.lastRenderParams) {
+            this.lastRenderParams = currentParams;
+            return true;
+        }
+        
+        const needsFullRender = Object.keys(currentParams).some(key => 
+            this.lastRenderParams[key] !== currentParams[key]
+        );
+        
+        if (needsFullRender) {
+            this.lastRenderParams = currentParams;
+        }
+        
+        return needsFullRender || this.needsFullRender;
+    }
+    
     loadSequence(events, duration) {
         this.events = events || [];
         this.duration = duration || 0;
-        this.render();
+        this.needsFullRender = true;
+        this.scheduleRender();
         this.updateMarkers();
     }
     
@@ -135,7 +225,8 @@ class SequenceEditor {
         const newZoom = Math.max(1, Math.min(100, zoomLevel));
         if (newZoom !== this.zoomLevel) {
             this.zoomLevel = newZoom;
-            this.render();
+            this.needsFullRender = true;
+            this.scheduleRender();
             this.updateMarkers();
             this.updatePlayhead();
             this.dispatchZoomEvent();
@@ -143,10 +234,11 @@ class SequenceEditor {
     }
     
     setScrollPosition(scrollPosition) {
-        const newScroll = Math.max(0, Math.min(1 - 1/this.zoomLevel, scrollPosition));
+        const maxScrollPosition = this.zoomLevel > 1 ? 1 : 0;
+        const newScroll = Math.max(0, Math.min(maxScrollPosition, scrollPosition));
         if (newScroll !== this.scrollPosition) {
             this.scrollPosition = newScroll;
-            this.render();
+            this.scheduleRender();
             this.updateMarkers();
             this.updatePlayhead();
             this.dispatchScrollEvent();
@@ -154,17 +246,27 @@ class SequenceEditor {
     }
     
     syncFromExternal(zoomLevel, scrollPosition) {
+        const zoomChanged = this.zoomLevel !== zoomLevel;
+        const scrollChanged = this.scrollPosition !== scrollPosition;
+        
         this.zoomLevel = Math.max(1, Math.min(100, zoomLevel));
-        this.scrollPosition = Math.max(0, Math.min(1 - 1/this.zoomLevel, scrollPosition));
-        this.render();
-        this.updateMarkers();
+        const maxScrollPosition = this.zoomLevel > 1 ? 1 : 0;
+        this.scrollPosition = Math.max(0, Math.min(maxScrollPosition, scrollPosition));
+        
+        // During playback, only render if zoom actually changed (scroll changes are frequent)
+        if (zoomChanged || !this.isPlaying) {
+            this.needsFullRender = true;
+            this.scheduleRender();
+            this.updateMarkers();
+        }
         this.updatePlayhead();
     }
     
     setExpanded(expanded) {
         this.isExpanded = expanded;
         this.container.classList.toggle('sequence-expanded', expanded);
-        this.render();
+        this.needsFullRender = true;
+        this.scheduleRender();
     }
     
     setDuration(duration) {
@@ -175,6 +277,10 @@ class SequenceEditor {
     setCurrentTime(time) {
         this.currentTime = time;
         this.updatePlayhead();
+    }
+    
+    setPlaying(isPlaying) {
+        this.isPlaying = isPlaying;
     }
     
     updatePlayhead() {
@@ -208,13 +314,15 @@ class SequenceEditor {
         
         this.events.push(event);
         this.events.sort((a, b) => a.time - b.time);
-        this.render();
+        this.needsFullRender = true;
+        this.scheduleRender();
         this.dispatchChangeEvent();
     }
     
     removeEvent(eventId) {
         this.events = this.events.filter(event => event.id !== eventId);
-        this.render();
+        this.needsFullRender = true;
+        this.scheduleRender();
         this.dispatchChangeEvent();
     }
     
@@ -223,12 +331,213 @@ class SequenceEditor {
         if (eventIndex !== -1) {
             this.events[eventIndex] = { ...this.events[eventIndex], ...eventData };
             this.events.sort((a, b) => a.time - b.time);
-            this.render();
+            this.needsFullRender = true;
+            this.scheduleRender();
             this.dispatchChangeEvent();
         }
     }
     
     render() {
+        if (this.shouldFullRender()) {
+            this.renderContentOptimized();
+            this.needsFullRender = false;
+        } else {
+            // Only update event positions for scroll/zoom changes
+            this.updateEventPositions();
+        }
+    }
+    
+    renderContentOptimized() {
+        // Use DocumentFragment for batch DOM operations
+        const fragment = document.createDocumentFragment();
+        
+        // Preserve playhead overlay
+        const playheadOverlay = this.playheadOverlay;
+        if (playheadOverlay && playheadOverlay.parentNode === this.container) {
+            this.container.removeChild(playheadOverlay);
+        }
+        
+        // Clear container efficiently
+        while (this.container.firstChild) {
+            this.container.removeChild(this.container.firstChild);
+        }
+        
+        // Clear caches
+        this.eventElements.clear();
+        this.trackElements.clear();
+        
+        // Render tracks
+        if (this.isExpanded) {
+            this.renderExpandedTracksOptimized(fragment);
+        } else {
+            this.renderCollapsedTrackOptimized(fragment);
+        }
+        
+        // Render visible events with virtual scrolling
+        this.renderEventsOptimized(fragment);
+        
+        // Batch append to DOM
+        this.container.appendChild(fragment);
+        
+        // Restore playhead overlay
+        if (playheadOverlay) {
+            this.container.appendChild(playheadOverlay);
+        }
+    }
+    
+    updateEventPositions() {
+        // Update only the positions of existing event elements
+        this.eventElements.forEach((element, eventId) => {
+            const event = this.events.find(e => e.id === eventId);
+            if (event) {
+                const x = this.timeToPixel(event.time);
+                const width = Math.max(20, this.timeToPixel(event.duration || 0.5));
+                element.style.left = x + 'px';
+                element.style.width = width + 'px';
+                
+                // Update track position if expanded
+                if (this.isExpanded) {
+                    const trackY = this.getTrackY(event);
+                    element.style.top = trackY + 'px';
+                }
+            }
+        });
+    }
+    
+    getTrackY(event) {
+        if (!this.isExpanded) return 2;
+        
+        const deviceGroups = {};
+        let deviceIndex = 0;
+        this.events.forEach(e => {
+            if (!deviceGroups[e.device_id]) {
+                deviceGroups[e.device_id] = deviceIndex++;
+            }
+        });
+        return (deviceGroups[event.device_id] || 0) * 35 + 2;
+    }
+    
+    renderExpandedTracksOptimized(fragment) {
+        const deviceGroups = {};
+        this.events.forEach(event => {
+            if (!deviceGroups[event.device_id]) {
+                deviceGroups[event.device_id] = [];
+            }
+            deviceGroups[event.device_id].push(event);
+        });
+        
+        Object.keys(deviceGroups).forEach((deviceId, index) => {
+            const track = this.createTrackElement(deviceId, index);
+            this.trackElements.set(deviceId, track);
+            fragment.appendChild(track);
+        });
+        
+        this.container.style.height = (Object.keys(deviceGroups).length * 35) + 'px';
+    }
+    
+    renderCollapsedTrackOptimized(fragment) {
+        const track = this.createTrackElement('main', 0);
+        this.trackElements.set('main', track);
+        fragment.appendChild(track);
+        
+        if (!this.container.style.height || this.container.style.height === '30px') {
+            this.container.style.height = '';
+        }
+    }
+    
+    createTrackElement(deviceId, index) {
+        const track = document.createElement('div');
+        track.className = 'sequence-track';
+        track.style.top = (index * 35) + 'px';
+        track.dataset.deviceId = deviceId;
+        
+        if (deviceId !== 'main') {
+            const label = document.createElement('div');
+            label.className = 'track-label';
+            label.textContent = `Device ${deviceId}`;
+            label.style.position = 'absolute';
+            label.style.left = '5px';
+            label.style.top = '5px';
+            label.style.fontSize = '12px';
+            label.style.color = '#6c757d';
+            track.appendChild(label);
+        }
+        
+        return track;
+    }
+    
+    renderEventsOptimized(fragment) {
+        // Implement virtual scrolling for large event lists
+        const visibleRange = this.getVisibleTimeRange();
+        const visibleEvents = this.events.filter(event => 
+            this.isEventVisible(event, visibleRange)
+        );
+        
+        // Limit rendering to visible events for performance
+        const maxVisibleEvents = 1000;
+        const eventsToRender = visibleEvents.slice(0, maxVisibleEvents);
+        
+        eventsToRender.forEach(event => {
+            const eventElement = this.createEventElementOptimized(event);
+            this.eventElements.set(event.id, eventElement);
+            fragment.appendChild(eventElement);
+        });
+    }
+    
+    getVisibleTimeRange() {
+        const visibleDuration = this.duration / this.zoomLevel;
+        const startTime = this.scrollPosition * (this.duration - visibleDuration);
+        const endTime = startTime + visibleDuration;
+        const buffer = visibleDuration * 0.1; // 10% buffer for smooth scrolling
+        
+        return {
+            start: Math.max(0, startTime - buffer),
+            end: Math.min(this.duration, endTime + buffer)
+        };
+    }
+    
+    isEventVisible(event, visibleRange) {
+        const eventEnd = event.time + (event.duration || 0.5);
+        return event.time <= visibleRange.end && eventEnd >= visibleRange.start;
+    }
+    
+    createEventElementOptimized(event) {
+        // Reuse elements from pool if available
+        let element = this.eventPool.pop();
+        if (!element) {
+            element = document.createElement('div');
+            element.className = 'sequence-event';
+        }
+        
+        // Update element properties
+        element.dataset.eventId = event.id;
+        
+        const x = this.timeToPixel(event.time);
+        const width = Math.max(20, this.timeToPixel(event.duration || 0.5));
+        element.style.left = x + 'px';
+        element.style.width = width + 'px';
+        element.style.top = this.getTrackY(event) + 'px';
+        element.style.backgroundColor = this.getEventColor(event);
+        
+        element.innerHTML = `
+            <span>${event.type}</span>
+            <div class="event-actions" style="display: none;">
+                <button class="btn btn-sm btn-outline-light" onclick="editEventFromElement(${event.id})">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-light" onclick="deleteEventFromElement(${event.id})">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        `;
+        
+        this.setupEventHover(element);
+        this.makeDraggable(element, event);
+        
+        return element;
+    }
+    
+    renderContent() {
         const playheadOverlay = this.playheadOverlay;
         if (playheadOverlay && playheadOverlay.parentNode === this.container) {
             this.container.removeChild(playheadOverlay);
@@ -524,6 +833,7 @@ class SequenceEditor {
     
     clearEvents() {
         this.events = [];
+        this.needsFullRender = true;
         this.render();
         this.dispatchChangeEvent();
     }

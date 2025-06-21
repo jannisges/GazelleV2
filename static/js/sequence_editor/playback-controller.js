@@ -75,6 +75,11 @@ class PlaybackController {
                 this.isPlaying = true;
                 this.updatePlayButton();
                 
+                // Set playing state for components
+                if (window.sequenceEditor) {
+                    window.sequenceEditor.setPlaying(true);
+                }
+                
                 // Get initial server position for accurate tracking
                 fetch('/api/playback-status')
                 .then(response => response.json())
@@ -106,6 +111,11 @@ class PlaybackController {
                 this.isPlaying = false;
                 this.stopPlaybackTracking();
                 this.updatePlayButton();
+                
+                // Set stopped state for components
+                if (window.sequenceEditor) {
+                    window.sequenceEditor.setPlaying(false);
+                }
             }
         })
         .catch(error => console.error('Error pausing playback:', error));
@@ -122,6 +132,11 @@ class PlaybackController {
                 this.updatePlayButton();
                 this.updatePositionDisplay(0);
                 this.updateSynchronizedComponents(0);
+                
+                // Set stopped state for components
+                if (window.sequenceEditor) {
+                    window.sequenceEditor.setPlaying(false);
+                }
             }
         })
         .catch(error => console.error('Error stopping playback:', error));
@@ -199,6 +214,11 @@ class PlaybackController {
             this.isPlaying = false;
             this.stopPlaybackTracking();
             this.updatePlayButton();
+            
+            // Set stopped state for components
+            if (window.sequenceEditor) {
+                window.sequenceEditor.setPlaying(false);
+            }
             return;
         }
         
@@ -213,9 +233,12 @@ class PlaybackController {
         this.updatePositionDisplay(this.currentPosition);
         this.updateSynchronizedComponents(this.currentPosition);
         
-        // Set playing state for waveform renderer
+        // Set playing state for waveform renderer and sequence editor
         if (window.waveformRenderer) {
             window.waveformRenderer.setPlaying(true);
+        }
+        if (window.sequenceEditor) {
+            window.sequenceEditor.setPlaying(true);
         }
     }
     
@@ -233,9 +256,12 @@ class PlaybackController {
             this.playbackInterval = null;
         }
         
-        // Stop waveform animation
+        // Ensure proper cleanup of animation loops
         if (window.waveformRenderer) {
             window.waveformRenderer.setPlaying(false);
+        }
+        if (window.sequenceEditor) {
+            window.sequenceEditor.setPlaying(false);
         }
     }
     
