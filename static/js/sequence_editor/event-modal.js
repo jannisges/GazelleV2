@@ -35,9 +35,13 @@ class EventModal {
         this.isEditing = false;
         this.editingEventId = null;
         
-        document.getElementById('eventTime').value = time.toFixed(2);
         this.loadDevicesForEvent();
         this.resetForm();
+        
+        const timeField = document.getElementById('eventTime');
+        if (timeField) {
+            timeField.value = time.toFixed(2);
+        }
         
         this.bootstrapModal.show();
     }

@@ -112,6 +112,15 @@ class WaveformRenderer {
             this.seekTo(time);
         });
         
+        // Right-click to add event
+        this.canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const rect = this.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const time = this.pixelToTime(x);
+            this.showAddEventDialog(time);
+        });
+        
         // Mouse wheel for zoom with throttling
         let zoomTimeout = null;
         this.canvas.addEventListener('wheel', (e) => {
@@ -778,6 +787,12 @@ class WaveformRenderer {
         // Dispatch seek event
         const event = new CustomEvent('waveform-seek', { detail: { time } });
         this.canvas.dispatchEvent(event);
+    }
+    
+    showAddEventDialog(time) {
+        if (window.eventModal) {
+            window.eventModal.showAddDialog(time);
+        }
     }
     
     formatTime(seconds) {

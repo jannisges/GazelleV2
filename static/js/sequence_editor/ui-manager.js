@@ -7,6 +7,7 @@ class UIManager {
         this.isExpanded = false;
         
         this.setupEventListeners();
+        this.checkForEditParameter();
     }
     
     setupEventListeners() {
@@ -36,6 +37,61 @@ class UIManager {
         }
         
         console.log('UI Manager event listeners setup complete');
+    }
+    
+    checkForEditParameter() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const editSequenceId = urlParams.get('edit');
+        
+        if (editSequenceId) {
+            this.loadSequence(parseInt(editSequenceId));
+        }
+    }
+    
+    loadSequence(sequenceId) {
+        fetch(`/api/get-sequence/${sequenceId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const sequence = data.sequence;
+                    
+                    // Load the song data
+                    this.currentSong = sequence.song;
+                    this.currentSequence = {
+                        id: sequence.id,
+                        name: sequence.name,
+                        events: sequence.events
+                    };
+                    
+                    // Update UI
+                    this.updateSongInfo();
+                    
+                    // Notify other components
+                    if (window.playbackController) {
+                        window.playbackController.setCurrentSong(this.currentSong);
+                        window.playbackController.setCurrentSequence(this.currentSequence);
+                    }
+                    
+                    // Render waveform and sequence
+                    if (this.currentSong.waveform_data) {
+                        this.renderWaveform(this.currentSong.waveform_data, this.currentSong.duration);
+                    }
+                    
+                    if (window.sequenceEditor) {
+                        window.sequenceEditor.loadSequence(this.currentSequence.events, this.currentSong.duration);
+                    }
+                    
+                    this.updateTimeline();
+                    
+                    console.log('Sequence loaded for editing:', sequence.name);
+                } else {
+                    alert('Error loading sequence: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading sequence:', error);
+                alert('Error loading sequence: ' + error.message);
+            });
     }
     
     setCurrentSong(song) {
@@ -172,7 +228,9 @@ class UIManager {
             return;
         }
         
-        const sequenceName = prompt('Enter sequence name:');
+        // If editing existing sequence, use current name as default
+        const defaultName = this.currentSequence.name || '';
+        const sequenceName = prompt('Enter sequence name:', defaultName);
         if (!sequenceName) return;
         
         const sequenceData = {
@@ -180,6 +238,11 @@ class UIManager {
             name: sequenceName,
             events: this.currentSequence.events
         };
+        
+        // Include sequence ID if editing existing sequence
+        if (this.currentSequence.id) {
+            sequenceData.id = this.currentSequence.id;
+        }
         
         fetch('/api/save-sequence', {
             method: 'POST',
@@ -194,6 +257,11 @@ class UIManager {
                 alert('Error: ' + data.error);
             } else {
                 alert('Sequence saved successfully!');
+                // Update current sequence ID if it was a new sequence
+                if (!this.currentSequence.id && data.sequence_id) {
+                    this.currentSequence.id = data.sequence_id;
+                    this.currentSequence.name = sequenceName;
+                }
             }
         })
         .catch(error => {

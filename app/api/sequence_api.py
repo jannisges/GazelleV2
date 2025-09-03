@@ -216,24 +216,28 @@ def add_to_playlist():
     try:
         data = request.get_json()
         playlist_id = data.get('playlist_id')
-        sequence_id = data.get('sequence_id')
+        sequence_ids = data.get('sequence_ids', [])
         
-        if not playlist_id or not sequence_id:
-            return jsonify({'error': 'Playlist ID and Sequence ID are required'}), 400
+        if not playlist_id or not sequence_ids:
+            return jsonify({'error': 'Playlist ID and Sequence IDs are required'}), 400
         
         playlist = db.session.get(Playlist, playlist_id)
         if not playlist:
             return jsonify({'error': 'Playlist not found'}), 404
         
-        sequence = db.session.get(Sequence, sequence_id)
-        if not sequence:
-            return jsonify({'error': 'Sequence not found'}), 404
+        # Validate all sequences exist
+        for sequence_id in sequence_ids:
+            sequence = db.session.get(Sequence, sequence_id)
+            if not sequence:
+                return jsonify({'error': f'Sequence {sequence_id} not found'}), 404
         
         sequences = playlist.get_sequences()
-        if sequence_id not in sequences:
-            sequences.append(sequence_id)
-            playlist.set_sequences(sequences)
-            db.session.commit()
+        for sequence_id in sequence_ids:
+            if sequence_id not in sequences:
+                sequences.append(sequence_id)
+        
+        playlist.set_sequences(sequences)
+        db.session.commit()
         
         return jsonify({'success': True})
     

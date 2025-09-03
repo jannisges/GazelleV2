@@ -106,7 +106,36 @@ def manage_sequences():
     from flask import render_template
     sequences = Sequence.query.all()
     playlists = Playlist.query.all()
-    return render_template('manage_sequences.html', sequences=sequences, playlists=playlists)
+    
+    # Convert sequences to dictionaries for JSON serialization
+    sequences_data = []
+    for seq in sequences:
+        sequences_data.append({
+            'id': seq.id,
+            'name': seq.name,
+            'song_id': seq.song_id,
+            'events': seq.get_events(),
+            'created_at': seq.created_at.isoformat() if seq.created_at else None,
+            'song': {
+                'id': seq.song.id,
+                'name': seq.song.name,
+                'duration': seq.song.duration
+            } if seq.song else None
+        })
+    
+    # Convert playlists to dictionaries for JSON serialization  
+    playlists_data = []
+    for playlist in playlists:
+        playlists_data.append({
+            'id': playlist.id,
+            'name': playlist.name,
+            'sequences': playlist.get_sequences(),
+            'is_active': playlist.is_active,
+            'random_mode': playlist.random_mode,
+            'created_at': playlist.created_at.isoformat() if playlist.created_at else None
+        })
+    
+    return render_template('manage_sequences.html', sequences=sequences_data, playlists=playlists_data)
 
 @app.route('/settings')
 def settings():
