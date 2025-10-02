@@ -1,7 +1,7 @@
 import threading
 import time
 from app.models.models import Playlist, Sequence, PatchedDevice, db
-from app.hardware.hardware import RPI_AVAILABLE
+from app.hardware.hardware import RPI_AVAILABLE, setup_gpio
 
 if RPI_AVAILABLE:
     import RPi.GPIO as GPIO
@@ -25,6 +25,8 @@ def button_handler():
     """Handle hardware button presses"""
     if not RPI_AVAILABLE:
         return
+    
+    setup_gpio()
     
     while True:
         if GPIO.input(BUTTON_PIN) == GPIO.LOW:
