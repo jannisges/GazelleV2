@@ -134,13 +134,24 @@ function loadWiFiNetworks() {
             const networksDiv = document.getElementById('wifiNetworks');
             networksDiv.innerHTML = '';
             
-            response.networks.forEach(network => {
+            // Sort networks by signal strength (backend already sorts, but ensure client-side sorting)
+            const sortedNetworks = response.networks.sort((a, b) => (b.signal || 0) - (a.signal || 0));
+            
+            sortedNetworks.forEach(network => {
                 const networkDiv = document.createElement('div');
                 networkDiv.className = `wifi-network ${network.connected ? 'connected' : ''}`;
                 networkDiv.onclick = () => selectWiFiNetwork(network.ssid, network.encrypted);
                 
                 const signalStrength = Math.floor(network.signal / 25); // Convert to 0-4 scale
                 const signalIcon = ['bi-wifi-off', 'bi-wifi-1', 'bi-wifi-2', 'bi-wifi'][signalStrength] || 'bi-wifi';
+                
+                // Determine signal strength color
+                let signalColor = 'text-danger'; // Weak signal (0-25%)
+                if (network.signal >= 75) {
+                    signalColor = 'text-success'; // Strong signal
+                } else if (network.signal >= 50) {
+                    signalColor = 'text-warning'; // Medium signal
+                }
                 
                 networkDiv.innerHTML = `
                     <div class="wifi-icon">
@@ -151,7 +162,10 @@ function loadWiFiNetworks() {
                         <small>${network.encrypted ? 'Secured' : 'Open'} ${network.connected ? '(Connected)' : ''}</small>
                     </div>
                     <div class="wifi-signal">
-                        <i class="bi ${signalIcon}"></i>
+                        <div class="d-flex align-items-center">
+                            <i class="bi ${signalIcon} ${signalColor} me-1"></i>
+                            <small class="${signalColor}">${network.signal}%</small>
+                        </div>
                     </div>
                 `;
                 

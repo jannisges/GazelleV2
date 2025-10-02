@@ -38,7 +38,7 @@ dmx_controller = DMXController()
 audio_player = AudioPlayer()
 
 # Initialize playback system with controller references
-playback.init_playback(dmx_controller, audio_player)
+playback.init_playback(dmx_controller, audio_player, app)
 
 # Register blueprints
 app.register_blueprint(device_api)

@@ -57,6 +57,7 @@ def wifi_networks():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @network_api.route('/api/connect-wifi', methods=['POST'])
 def connect_wifi():
     try:
@@ -234,8 +235,8 @@ def scan_wifi_networks():
     networks = []
     
     try:
-        # Try nmcli first (NetworkManager)
-        result = subprocess.run(['nmcli', 'device', 'wifi', 'list'], 
+        # Try nmcli first (NetworkManager) - use newer format with explicit fields
+        result = subprocess.run(['nmcli', '-f', 'BSSID,SSID,MODE,CHAN,FREQ,RATE,SIGNAL,BARS,SECURITY', 'device', 'wifi', 'list'], 
                               capture_output=True, text=True, timeout=15)
         
         if result.returncode == 0:
@@ -243,38 +244,83 @@ def scan_wifi_networks():
             current_ssid = get_current_ssid()
             
             for line in lines[1:]:  # Skip header
-                parts = line.split()
-                if len(parts) >= 6:
-                    # Parse nmcli output: * SSID MODE CHAN RATE SIGNAL BARS SECURITY
-                    connected = parts[0] == '*'
-                    ssid = parts[1] if not connected else parts[2]
-                    
-                    if ssid == '--':
+                # With -f flag, the format is more structured:
+                # BSSID    SSID    MODE    CHAN    FREQ    RATE    SIGNAL    BARS    SECURITY
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Check if network is connected (starts with *)
+                connected = line.startswith('*')
+                if connected:
+                    line = line[1:].strip()  # Remove the * marker
+                
+                # Split the line by multiple spaces to handle formatted columns
+                # nmcli with -f creates column-formatted output
+                import re
+                parts = re.split(r'\s{2,}', line)  # Split on 2+ spaces (column separators)
+                
+                if len(parts) < 7:  # Need at least BSSID SSID MODE CHAN FREQ RATE SIGNAL
+                    # Fallback to space split if column split doesn't work
+                    parts = line.split()
+                    if len(parts) < 7:
                         continue
-                        
-                    # Extract signal strength (remove % and dBm)
-                    signal_str = parts[5] if not connected else parts[6]
+                
+                try:
+                    bssid = parts[0].strip()
+                    ssid = parts[1].strip()
+                    mode = parts[2].strip()
+                    chan = parts[3].strip()
+                    
+                    # Signal should be at index 6 (BSSID, SSID, MODE, CHAN, FREQ, RATE, SIGNAL)
+                    if len(parts) > 6:
+                        signal_str = parts[6].strip()
+                    else:
+                        signal_str = "0"
+                    
+                    if ssid == '--' or not ssid:
+                        continue
+                    
+                    # Parse signal strength
                     signal = 0
                     try:
-                        if signal_str.endswith('%'):
+                        # nmcli typically shows signal in dBm format like "-45"
+                        if signal_str.startswith('-') and signal_str[1:].isdigit():
+                            # Convert dBm to percentage
+                            dbm = int(signal_str)
+                            # Formula: quality = 2 * (dBm + 100) for dBm between -100 and 0
+                            signal = max(0, min(100, 2 * (dbm + 100)))
+                        elif signal_str.endswith('%'):
                             signal = int(signal_str[:-1])
-                        elif 'dBm' in signal_str:
-                            # Convert dBm to percentage (rough approximation)
-                            dbm = int(signal_str.split()[0])
-                            signal = max(0, min(100, (dbm + 100) * 2))
-                    except:
+                        elif signal_str.isdigit():
+                            # Already a percentage
+                            signal = int(signal_str)
+                        else:
+                            # Try to extract number from string
+                            match = re.search(r'-?\d+', signal_str)
+                            if match:
+                                num = int(match.group())
+                                if num < 0:  # Negative means dBm
+                                    signal = max(0, min(100, 2 * (num + 100)))
+                                else:  # Positive means percentage
+                                    signal = min(100, num)
+                    except (ValueError, TypeError):
                         signal = 0
                     
-                    # Check if encrypted
-                    security = ' '.join(parts[7:]) if not connected else ' '.join(parts[8:])
-                    encrypted = 'WPA' in security or 'WEP' in security
+                    # Check if encrypted - look for security info
+                    security = parts[8] if len(parts) > 8 else ''
+                    encrypted = any(sec in security.upper() for sec in ['WPA', 'WEP', 'WPS'])
                     
-                    networks.append({
-                        'ssid': ssid,
-                        'signal': signal,
-                        'encrypted': encrypted,
-                        'connected': connected or ssid == current_ssid
-                    })
+                except (IndexError, ValueError):
+                    signal = 0
+                    encrypted = False
+                
+                networks.append({
+                    'ssid': ssid,
+                    'signal': signal,
+                    'encrypted': encrypted,
+                    'connected': connected or ssid == current_ssid
+                })
             
             return networks
             

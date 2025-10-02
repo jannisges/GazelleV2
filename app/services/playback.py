@@ -14,52 +14,107 @@ current_sequence = None
 is_playing = False
 dmx_controller = None
 audio_player = None
+flask_app = None
+playback_lock = threading.Lock()
+last_trigger_time = 0
 
-def init_playback(dmx_ctrl, audio_ctrl):
+def init_playback(dmx_ctrl, audio_ctrl, app_instance=None):
     """Initialize playback with controller references"""
-    global dmx_controller, audio_player
+    global dmx_controller, audio_player, flask_app
     dmx_controller = dmx_ctrl
     audio_player = audio_ctrl
+    flask_app = app_instance
 
 def button_handler():
-    """Handle hardware button presses"""
+    """Handle hardware button presses using reliable polling with atomic debouncing"""
+    global last_trigger_time
+    
     if not RPI_AVAILABLE:
         return
     
-    setup_gpio()
-    
-    while True:
-        if GPIO.input(BUTTON_PIN) == GPIO.LOW:
-            # Button pressed, trigger playback
-            trigger_sequence_playback()
-            time.sleep(0.5)  # Debounce
-        time.sleep(0.1)
+    # GPIO should already be set up by main app, just configure the button pin
+    try:
+        # Don't call GPIO.setmode() again - it's already been called
+        GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        
+        # Check initial button state
+        initial_state = GPIO.input(BUTTON_PIN)
+        print(f"[INFO] Button handler initialized, initial state: {initial_state}")
+        
+        last_trigger_time = 0
+        button_state = GPIO.HIGH  # Track button state
+        
+        while True:
+            current_state = GPIO.input(BUTTON_PIN)
+            current_time = time.time()
+            
+            # Detect button press (HIGH to LOW transition)
+            if button_state == GPIO.HIGH and current_state == GPIO.LOW:
+                # Button just pressed - check debounce time
+                if current_time - last_trigger_time > 2.0:
+                    print(f"[INFO] Button pressed, starting sequence playback")
+                    
+                    # Immediately update last_trigger_time to prevent double triggers
+                    last_trigger_time = current_time
+                    
+                    # Wait for button release to ensure clean press
+                    while GPIO.input(BUTTON_PIN) == GPIO.LOW:
+                        time.sleep(0.05)
+                    
+                    # Now trigger the sequence
+                    trigger_sequence_playback()
+                    
+                    # Extra delay to prevent any bounce issues
+                    time.sleep(0.5)
+            
+            # Update button state for next iteration
+            button_state = current_state
+            time.sleep(0.05)  # Fast polling for responsive button detection
+            
+    except Exception as e:
+        print(f"[DEBUG] GPIO setup error: {e}")
+        print(f"[DEBUG] Exception details: {type(e).__name__}: {str(e)}")
+        return
 
 def trigger_sequence_playback():
     """Trigger playback from hardware button"""
-    global current_sequence, is_playing
+    global current_sequence, is_playing, flask_app
     
-    # Get active playlists and select a sequence
-    active_playlists = Playlist.query.filter_by(is_active=True).all()
-    if not active_playlists:
+    # Use lock to prevent concurrent execution
+    if not playback_lock.acquire(blocking=False):
+        print("[INFO] Playback already in progress, ignoring button press")
         return
     
-    # For now, just play the first sequence from the first active playlist
-    playlist = active_playlists[0]
-    sequence_ids = playlist.get_sequences()
-    if not sequence_ids:
-        return
+    try:
+        
+        if not flask_app:
+            return
+        
+        with flask_app.app_context():
+            # Get active playlists and select a sequence
+            active_playlists = Playlist.query.filter_by(is_active=True).all()
+            if not active_playlists:
+                return
+            
+            # For now, just play the first sequence from the first active playlist
+            playlist = active_playlists[0]
+            sequence_ids = playlist.get_sequences()
+            if not sequence_ids:
+                return
+            
+            sequence = db.session.get(Sequence, sequence_ids[0])
+            if sequence and sequence.song:
+                play_sequence(sequence)
     
-    sequence = db.session.get(Sequence, sequence_ids[0])
-    if sequence and sequence.song:
-        play_sequence(sequence)
+    finally:
+        playback_lock.release()
 
 def play_sequence(sequence, start_time=0):
     """Play a lighting sequence"""
     global current_sequence, is_playing
     
-    if is_playing:
-        audio_player.stop()
+    # Stop any existing playback completely
+    stop_playback()
     
     current_sequence = sequence
     is_playing = True
@@ -100,33 +155,39 @@ def sequence_playback_loop(sequence, start_time_offset=0):
 
 def execute_dmx_event(event):
     """Execute a single DMX event"""
+    global flask_app
+    
     device_id = event.get('device_id')
     event_type = event.get('type')
     value = event.get('value', 0)
     
-    patched_device = PatchedDevice.query.filter_by(device_id=device_id).first()
-    if not patched_device:
+    if not flask_app:
         return
     
-    device = patched_device.device
-    channels = device.get_channels()
-    
-    for i, channel in enumerate(channels):
-        dmx_address = patched_device.start_address + i
-        channel_type = channel.get('type')
+    with flask_app.app_context():
+        patched_device = PatchedDevice.query.filter_by(device_id=device_id).first()
+        if not patched_device:
+            return
         
-        if event_type == 'dimmer' and channel_type == 'dimmer_channel':
-            dmx_controller.set_channel(dmx_address, int(value * 255 / 100))
-        elif event_type == 'color':
-            color = event.get('color', {})
-            if channel_type == 'red_channel':
-                dmx_controller.set_channel(dmx_address, color.get('r', 0))
-            elif channel_type == 'green_channel':
-                dmx_controller.set_channel(dmx_address, color.get('g', 0))
-            elif channel_type == 'blue_channel':
-                dmx_controller.set_channel(dmx_address, color.get('b', 0))
-            elif channel_type == 'white_channel':
-                dmx_controller.set_channel(dmx_address, color.get('w', 0))
+        device = patched_device.device
+        channels = device.get_channels()
+    
+        for i, channel in enumerate(channels):
+            dmx_address = patched_device.start_address + i
+            channel_type = channel.get('type')
+            
+            if event_type == 'dimmer' and channel_type == 'dimmer_channel':
+                dmx_controller.set_channel(dmx_address, int(value * 255 / 100))
+            elif event_type == 'color':
+                color = event.get('color', {})
+                if channel_type == 'red_channel':
+                    dmx_controller.set_channel(dmx_address, color.get('r', 0))
+                elif channel_type == 'green_channel':
+                    dmx_controller.set_channel(dmx_address, color.get('g', 0))
+                elif channel_type == 'blue_channel':
+                    dmx_controller.set_channel(dmx_address, color.get('b', 0))
+                elif channel_type == 'white_channel':
+                    dmx_controller.set_channel(dmx_address, color.get('w', 0))
 
 def stop_playback():
     """Stop current playback"""
@@ -136,6 +197,8 @@ def stop_playback():
     current_sequence = None
     if audio_player:
         audio_player.stop()
+        # Small delay to ensure pygame fully stops
+        time.sleep(0.1)
     
     # Clear all DMX channels
     if dmx_controller:

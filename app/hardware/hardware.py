@@ -174,7 +174,7 @@ def setup_gpio():
     if RPI_AVAILABLE:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(DMX_PIN, GPIO.OUT)
-        GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        # BUTTON_PIN setup moved to playback service to avoid conflicts
 
 def cleanup_gpio():
     """Cleanup GPIO pins"""
