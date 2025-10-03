@@ -26,107 +26,134 @@ def init_playback(dmx_ctrl, audio_ctrl, app_instance=None):
     flask_app = app_instance
 
 def button_handler():
-    """Handle hardware button presses using reliable polling with atomic debouncing"""
+    """Handle hardware button presses - simple edge detection with debouncing"""
     global last_trigger_time
-    
+
     if not RPI_AVAILABLE:
         return
-    
-    # GPIO should already be set up by main app, just configure the button pin
+
     try:
-        # Don't call GPIO.setmode() again - it's already been called
+        # Setup button with pull-up resistor (button press = LOW)
         GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        
-        # Check initial button state
-        initial_state = GPIO.input(BUTTON_PIN)
-        print(f"[INFO] Button handler initialized, initial state: {initial_state}")
-        
-        last_trigger_time = 0
-        button_state = GPIO.HIGH  # Track button state
-        
+        print(f"[INFO] Button handler started on GPIO {BUTTON_PIN}")
+
+        # Simple state machine
+        button_was_high = True
+
         while True:
-            current_state = GPIO.input(BUTTON_PIN)
+            button_is_high = GPIO.input(BUTTON_PIN) == GPIO.HIGH
             current_time = time.time()
-            
-            # Detect button press (HIGH to LOW transition)
-            if button_state == GPIO.HIGH and current_state == GPIO.LOW:
-                # Button just pressed - check debounce time
-                if current_time - last_trigger_time > 2.0:
-                    print(f"[INFO] Button pressed, starting sequence playback")
-                    
-                    # Immediately update last_trigger_time to prevent double triggers
-                    last_trigger_time = current_time
-                    
-                    # Wait for button release to ensure clean press
-                    while GPIO.input(BUTTON_PIN) == GPIO.LOW:
-                        time.sleep(0.05)
-                    
-                    # Now trigger the sequence
-                    trigger_sequence_playback()
-                    
-                    # Extra delay to prevent any bounce issues
-                    time.sleep(0.5)
-            
-            # Update button state for next iteration
-            button_state = current_state
-            time.sleep(0.05)  # Fast polling for responsive button detection
-            
+
+            # Detect falling edge (button pressed)
+            if button_was_high and not button_is_high:
+                # Debounce by waiting and checking again
+                time.sleep(0.05)
+
+                # Confirm button is still pressed
+                if GPIO.input(BUTTON_PIN) == GPIO.LOW:
+                    # Check cooldown period
+                    if current_time - last_trigger_time >= 2.0:
+                        print(f"[INFO] Button pressed - triggering playback")
+                        last_trigger_time = current_time
+
+                        # Trigger playback in background to avoid blocking
+                        threading.Thread(target=trigger_sequence_playback, daemon=True).start()
+
+                        # Wait for button release to prevent repeat triggers
+                        while GPIO.input(BUTTON_PIN) == GPIO.LOW:
+                            time.sleep(0.05)
+
+                        print(f"[INFO] Button released")
+                        button_was_high = True
+                        time.sleep(0.1)  # Extra debounce after release
+                        continue
+
+            button_was_high = button_is_high
+            time.sleep(0.02)
+
     except Exception as e:
-        print(f"[DEBUG] GPIO setup error: {e}")
-        print(f"[DEBUG] Exception details: {type(e).__name__}: {str(e)}")
+        print(f"[ERROR] Button handler error: {e}")
+        import traceback
+        traceback.print_exc()
         return
 
 def trigger_sequence_playback():
-    """Trigger playback from hardware button"""
+    """Trigger playback from hardware button - must acquire lock to execute"""
     global current_sequence, is_playing, flask_app
-    
-    # Use lock to prevent concurrent execution
-    if not playback_lock.acquire(blocking=False):
-        print("[INFO] Playback already in progress, ignoring button press")
+
+    # Try to acquire lock - if already locked, exit immediately
+    lock_acquired = playback_lock.acquire(blocking=False)
+    if not lock_acquired:
+        print("[WARNING] Trigger ignored - playback already starting")
         return
-    
+
     try:
-        
+        print("[INFO] Lock acquired - starting playback trigger")
+
         if not flask_app:
+            print("[ERROR] Flask app not initialized")
             return
-        
+
         with flask_app.app_context():
-            # Get active playlists and select a sequence
+            # Get active playlists
             active_playlists = Playlist.query.filter_by(is_active=True).all()
             if not active_playlists:
+                print("[WARNING] No active playlists found")
                 return
-            
-            # For now, just play the first sequence from the first active playlist
+
+            # Get first sequence from first playlist
             playlist = active_playlists[0]
             sequence_ids = playlist.get_sequences()
             if not sequence_ids:
+                print("[WARNING] Playlist has no sequences")
                 return
-            
+
             sequence = db.session.get(Sequence, sequence_ids[0])
-            if sequence and sequence.song:
-                play_sequence(sequence)
-    
+            if not sequence or not sequence.song:
+                print("[WARNING] Sequence or song not found")
+                return
+
+            print(f"[INFO] Playing sequence: {sequence.name if hasattr(sequence, 'name') else 'Unnamed'}")
+            play_sequence(sequence)
+
+            # Hold lock briefly to ensure playback fully initializes
+            time.sleep(0.5)
+            print("[INFO] Playback started successfully")
+
+    except Exception as e:
+        print(f"[ERROR] Playback trigger failed: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         playback_lock.release()
+        print("[INFO] Lock released")
 
 def play_sequence(sequence, start_time=0):
     """Play a lighting sequence"""
     global current_sequence, is_playing
-    
+
+    print(f"[INFO] play_sequence called for: {sequence.song.file_path if sequence.song else 'No song'}")
+
     # Stop any existing playback completely
-    stop_playback()
-    
+    if is_playing:
+        print("[INFO] Stopping existing playback")
+        stop_playback()
+
     current_sequence = sequence
     is_playing = True
-    
+
     # Load and play audio
     if audio_player.load_song(sequence.song.file_path):
+        print("[INFO] Audio loaded, starting playback")
         audio_player.play(start_time)
-        
+
         # Start sequence playback in separate thread
         playback_thread = threading.Thread(target=sequence_playback_loop, args=(sequence, start_time))
         playback_thread.daemon = True
         playback_thread.start()
+        print("[INFO] Playback thread started")
+    else:
+        print("[ERROR] Failed to load audio file")
 
 def sequence_playback_loop(sequence, start_time_offset=0):
     """Main loop for sequence playback"""
@@ -192,14 +219,15 @@ def execute_dmx_event(event):
 def stop_playback():
     """Stop current playback"""
     global is_playing, current_sequence
-    
+
+    print("[INFO] Stopping playback")
     is_playing = False
     current_sequence = None
+
     if audio_player:
         audio_player.stop()
-        # Small delay to ensure pygame fully stops
         time.sleep(0.1)
-    
+
     # Clear all DMX channels
     if dmx_controller:
         for i in range(512):

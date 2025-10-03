@@ -145,16 +145,18 @@ def settings():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    
+
     # Start DMX controller
     dmx_controller.start()
-    
-    # Start button handler thread
-    if RPI_AVAILABLE:
+
+    # Start button handler thread only in the reloader process (not the parent process)
+    # This prevents the button handler from running twice when debug=True
+    import os
+    if RPI_AVAILABLE and os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         button_thread = threading.Thread(target=playback.button_handler)
         button_thread.daemon = True
         button_thread.start()
-    
+
     try:
         app.run(host='0.0.0.0', port=5000, debug=True)
     finally:
