@@ -1,5 +1,6 @@
 import threading
 import time
+import random
 from app.models.models import Playlist, Sequence, PatchedDevice, db
 from app.hardware.hardware import RPI_AVAILABLE, setup_gpio
 
@@ -17,6 +18,9 @@ audio_player = None
 flask_app = None
 playback_lock = threading.Lock()
 last_trigger_time = 0
+current_playlist_index = 0  # Track which playlist we're on
+current_sequence_index = 0  # Track which sequence in playlist
+shuffled_sequence_order = []  # Store shuffled order for random mode
 
 def init_playback(dmx_ctrl, audio_ctrl, app_instance=None):
     """Initialize playback with controller references"""
@@ -79,7 +83,7 @@ def button_handler():
 
 def trigger_sequence_playback():
     """Trigger playback from hardware button - must acquire lock to execute"""
-    global current_sequence, is_playing, flask_app
+    global current_sequence, is_playing, flask_app, current_playlist_index, current_sequence_index, shuffled_sequence_order
 
     # Try to acquire lock - if already locked, exit immediately
     lock_acquired = playback_lock.acquire(blocking=False)
@@ -101,14 +105,58 @@ def trigger_sequence_playback():
                 print("[WARNING] No active playlists found")
                 return
 
-            # Get first sequence from first playlist
-            playlist = active_playlists[0]
+            # Ensure playlist index is valid
+            if current_playlist_index >= len(active_playlists):
+                current_playlist_index = 0
+
+            # Get current playlist
+            playlist = active_playlists[current_playlist_index]
             sequence_ids = playlist.get_sequences()
             if not sequence_ids:
                 print("[WARNING] Playlist has no sequences")
+                # Move to next playlist
+                current_playlist_index = (current_playlist_index + 1) % len(active_playlists)
+                current_sequence_index = 0
+                shuffled_sequence_order = []
                 return
 
-            sequence = db.session.get(Sequence, sequence_ids[0])
+            # Select sequence based on random mode
+            if playlist.random_mode:
+                # Random mode: shuffle once, then play in that order
+                # Check if we need to create a new shuffle (playlist changed or finished)
+                if (not shuffled_sequence_order or
+                    set(shuffled_sequence_order) != set(sequence_ids) or
+                    current_sequence_index >= len(shuffled_sequence_order)):
+                    shuffled_sequence_order = sequence_ids.copy()
+                    random.shuffle(shuffled_sequence_order)
+                    current_sequence_index = 0
+                    print(f"[INFO] Random mode: shuffled playlist")
+
+                sequence_id = shuffled_sequence_order[current_sequence_index]
+                print(f"[INFO] Random mode: playing {current_sequence_index + 1}/{len(shuffled_sequence_order)} from shuffled order")
+
+                # Move to next in shuffled order
+                current_sequence_index += 1
+                if current_sequence_index >= len(shuffled_sequence_order):
+                    # Finished shuffled playlist, move to next playlist and reshuffle
+                    current_sequence_index = 0
+                    current_playlist_index = (current_playlist_index + 1) % len(active_playlists)
+                    shuffled_sequence_order = []
+            else:
+                # Cycle mode: pick next sequence in order
+                if current_sequence_index >= len(sequence_ids):
+                    current_sequence_index = 0
+                sequence_id = sequence_ids[current_sequence_index]
+                print(f"[INFO] Cycle mode: selecting sequence {current_sequence_index + 1}/{len(sequence_ids)}")
+
+                # Move to next sequence for next button press
+                current_sequence_index += 1
+                if current_sequence_index >= len(sequence_ids):
+                    # Finished playlist, move to next one
+                    current_sequence_index = 0
+                    current_playlist_index = (current_playlist_index + 1) % len(active_playlists)
+
+            sequence = db.session.get(Sequence, sequence_id)
             if not sequence or not sequence.song:
                 print("[WARNING] Sequence or song not found")
                 return
