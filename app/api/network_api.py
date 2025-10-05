@@ -64,36 +64,41 @@ def connect_wifi():
         data = request.get_json()
         ssid = data.get('ssid')
         password = data.get('password')
-        
+
         if not ssid:
-            return jsonify({'error': 'SSID is required'}), 400
-        
-        # Try to connect using nmcli
-        cmd = ['nmcli', 'device', 'wifi', 'connect', ssid]
+            return jsonify({'success': False, 'error': 'SSID is required'}), 400
+
+        # Try to connect using nmcli with sudo for proper permissions
+        cmd = ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid]
         if password:
             cmd.extend(['password', password])
-        
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        
+
         if result.returncode == 0:
             return jsonify({
                 'success': True,
                 'message': f'Connected to {ssid}'
             })
         else:
+            # Return detailed error message from nmcli
+            error_msg = result.stderr.strip() if result.stderr.strip() else result.stdout.strip()
             return jsonify({
-                'error': f'Failed to connect: {result.stderr.strip()}'
-            }), 500
-            
+                'success': False,
+                'error': f'Failed to connect: {error_msg}'
+            })
+
     except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Connection timeout'}), 500
+        return jsonify({'success': False, 'error': 'Connection timeout - the network took too long to respond'}), 200
+    except FileNotFoundError:
+        return jsonify({'success': False, 'error': 'nmcli not found - NetworkManager may not be installed'}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'error': f'Connection error: {str(e)}'}), 200
 
 @network_api.route('/api/disconnect-wifi', methods=['POST'])
 def disconnect_wifi():
     try:
-        result = subprocess.run(['nmcli', 'connection', 'down', 'id', 'wifi'], 
+        result = subprocess.run(['sudo', 'nmcli', 'connection', 'down', 'id', 'wifi'],
                               capture_output=True, text=True, timeout=10)
         
         return jsonify({
@@ -113,7 +118,7 @@ def configure_hotspot():
         
         # Create hotspot using nmcli
         result = subprocess.run([
-            'nmcli', 'connection', 'add', 'type', 'wifi', 'ifname', 'wlan0',
+            'sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'ifname', 'wlan0',
             'con-name', 'Hotspot', 'autoconnect', 'yes', 'ssid', ssid,
             'wifi.mode', 'ap', 'wifi.band', 'bg', 'ipv4.method', 'shared',
             'wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password
@@ -122,7 +127,7 @@ def configure_hotspot():
         if result.returncode == 0:
             # Activate the hotspot
             activate_result = subprocess.run([
-                'nmcli', 'connection', 'up', 'Hotspot'
+                'sudo', 'nmcli', 'connection', 'up', 'Hotspot'
             ], capture_output=True, text=True, timeout=10)
             
             if activate_result.returncode == 0:
@@ -145,7 +150,7 @@ def configure_hotspot():
 @network_api.route('/api/disable-hotspot', methods=['POST'])
 def disable_hotspot():
     try:
-        result = subprocess.run(['nmcli', 'connection', 'down', 'Hotspot'], 
+        result = subprocess.run(['sudo', 'nmcli', 'connection', 'down', 'Hotspot'], 
                               capture_output=True, text=True, timeout=10)
         
         return jsonify({

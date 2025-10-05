@@ -88,17 +88,21 @@ function apiCall(endpoint, method = 'GET', data = null) {
             'Content-Type': 'application/json',
         }
     };
-    
+
     if (data) {
         options.body = JSON.stringify(data);
     }
-    
+
     return fetch(endpoint, options)
         .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            return response.json();
+            // Always parse JSON first to get error details
+            return response.json().then(jsonData => {
+                if (!response.ok) {
+                    // Return the JSON error response instead of throwing
+                    return jsonData;
+                }
+                return jsonData;
+            });
         });
 }
 
