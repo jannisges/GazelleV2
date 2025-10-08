@@ -18,47 +18,60 @@ class EventModal {
     }
     
     setupEventListeners() {
-        const eventTypeSelect = document.getElementById('eventType');
-        if (eventTypeSelect) {
-            eventTypeSelect.addEventListener('change', () => this.updateEventFields());
-        }
-        
         const saveEventBtn = document.getElementById('saveEventBtn');
         if (saveEventBtn) {
             saveEventBtn.addEventListener('click', () => this.saveEvent());
+        }
+
+        // Listen for device selection changes
+        const deviceList = document.getElementById('deviceList');
+        if (deviceList) {
+            deviceList.addEventListener('change', () => this.updateEventTypeOptions());
         }
     }
     
     showAddDialog(time) {
         if (!this.modal) return;
-        
+
         this.isEditing = false;
         this.editingEventId = null;
-        
+
         this.loadDevicesForEvent();
         this.resetForm();
-        
+
         const timeField = document.getElementById('eventTime');
         if (timeField) {
             timeField.value = time.toFixed(2);
         }
-        
+
         this.bootstrapModal.show();
     }
     
     editEvent(event) {
         if (!this.modal) return;
-        
+
         this.isEditing = true;
         this.editingEventId = event.id;
-        
+
         document.getElementById('eventTime').value = event.time;
-        document.getElementById('eventType').value = event.type;
-        
-        this.updateEventFields();
-        this.populateEventData(event);
+
         this.loadDevicesForEvent();
-        
+
+        // Need to wait for devices to load before selecting device and updating fields
+        setTimeout(() => {
+            // Select the device
+            const deviceCheckbox = document.querySelector(`#deviceList input[value="${event.device_id}"]`);
+            if (deviceCheckbox) {
+                deviceCheckbox.checked = true;
+            }
+
+            // Update fields based on selected device
+            this.updateEventTypeOptions();
+
+            // Populate the specific event data
+            this.populateEventData(event);
+        }, 100);
+
         this.bootstrapModal.show();
     }
     
@@ -66,8 +79,10 @@ class EventModal {
         switch (event.type) {
             case 'dimmer':
                 const dimmerValue = document.getElementById('dimmerValue');
+                const dimmerDisplay = document.getElementById('dimmerValueDisplay');
                 if (dimmerValue) {
                     dimmerValue.value = event.value;
+                    if (dimmerDisplay) dimmerDisplay.textContent = event.value + '%';
                 }
                 break;
             case 'color':
@@ -79,66 +94,153 @@ class EventModal {
             case 'position':
                 const panValue = document.getElementById('panValue');
                 const tiltValue = document.getElementById('tiltValue');
+                const panDisplay = document.getElementById('panValueDisplay');
+                const tiltDisplay = document.getElementById('tiltValueDisplay');
                 if (panValue && event.value && event.value.pan !== undefined) {
                     panValue.value = event.value.pan;
+                    if (panDisplay) panDisplay.textContent = event.value.pan;
                 }
                 if (tiltValue && event.value && event.value.tilt !== undefined) {
                     tiltValue.value = event.value.tilt;
+                    if (tiltDisplay) tiltDisplay.textContent = event.value.tilt;
                 }
                 break;
         }
     }
     
-    updateEventFields() {
-        const eventType = document.getElementById('eventType')?.value;
+    getSupportedEventTypes(deviceChannels) {
+        const supportedTypes = [];
+
+        if (!deviceChannels || deviceChannels.length === 0) {
+            return supportedTypes;
+        }
+
+        const channelTypes = deviceChannels.map(ch => ch.type);
+
+        // Check if device supports dimmer
+        if (channelTypes.includes('dimmer_channel')) {
+            supportedTypes.push('dimmer');
+        }
+
+        // Check if device supports color (needs R, G, B channels)
+        if (channelTypes.includes('red_channel') &&
+            channelTypes.includes('green_channel') &&
+            channelTypes.includes('blue_channel')) {
+            supportedTypes.push('color');
+        }
+
+        // Check if device supports position (needs pan and tilt)
+        if (channelTypes.includes('pan') && channelTypes.includes('tilt')) {
+            supportedTypes.push('position');
+        }
+
+        return supportedTypes;
+    }
+
+    updateEventTypeOptions() {
+        const selectedDeviceIds = this.getSelectedDevices();
         const fieldsContainer = document.getElementById('eventFields');
-        
+
         if (!fieldsContainer) return;
-        
-        switch(eventType) {
-            case 'dimmer':
-                fieldsContainer.innerHTML = `
-                    <div class="mb-3">
-                        <label class="form-label">Dimmer Value (%)</label>
-                        <input type="range" class="form-range" id="dimmerValue" min="0" max="100" value="100">
-                        <div class="d-flex justify-content-between">
-                            <small>0%</small>
-                            <small>100%</small>
-                        </div>
+
+        // Clear if no device selected
+        if (selectedDeviceIds.length === 0) {
+            fieldsContainer.innerHTML = '';
+            return;
+        }
+
+        // Get the selected device
+        const selectedDeviceId = selectedDeviceIds[0];
+        const selectedPatch = this.patchedDevices.find(p => p.id === selectedDeviceId);
+
+        if (!selectedPatch) {
+            fieldsContainer.innerHTML = '';
+            return;
+        }
+
+        // Get supported event types
+        const supportedTypes = this.getSupportedEventTypes(selectedPatch.device.channels);
+
+        if (supportedTypes.length === 0) {
+            fieldsContainer.innerHTML = '<p class="text-muted">No supported event types for this device</p>';
+            return;
+        }
+
+        // Build HTML for all supported event types
+        let html = '';
+
+        if (supportedTypes.includes('dimmer')) {
+            html += `
+                <div class="mb-4 pb-3 border-bottom">
+                    <label class="form-label fw-bold">Dimmer Value (%)</label>
+                    <input type="range" class="form-range" id="dimmerValue" min="0" max="100" value="100">
+                    <div class="d-flex justify-content-between">
+                        <small>0%</small>
+                        <small id="dimmerValueDisplay">100%</small>
                     </div>
-                `;
-                break;
-            case 'color':
-                fieldsContainer.innerHTML = `
+                </div>
+            `;
+        }
+
+        if (supportedTypes.includes('color')) {
+            html += `
+                <div class="mb-4 pb-3 border-bottom">
+                    <label class="form-label fw-bold">Color</label>
+                    <input type="color" class="form-control form-control-color w-100" id="colorValue" value="#ffffff">
+                </div>
+            `;
+        }
+
+        if (supportedTypes.includes('position')) {
+            html += `
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Position</label>
                     <div class="row">
                         <div class="col-md-6">
-                            <label class="form-label">Color</label>
-                            <input type="color" class="form-control form-control-color" id="colorValue" value="#ffffff">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">White</label>
-                            <input type="range" class="form-range" id="whiteValue" min="0" max="255" value="0">
-                        </div>
-                    </div>
-                `;
-                break;
-            case 'position':
-                fieldsContainer.innerHTML = `
-                    <div class="row">
-                        <div class="col-md-6">
-                            <label class="form-label">Pan</label>
+                            <label class="form-label small">Pan</label>
                             <input type="range" class="form-range" id="panValue" min="0" max="255" value="128">
+                            <small id="panValueDisplay">128</small>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Tilt</label>
+                            <label class="form-label small">Tilt</label>
                             <input type="range" class="form-range" id="tiltValue" min="0" max="255" value="128">
+                            <small id="tiltValueDisplay">128</small>
                         </div>
                     </div>
-                `;
-                break;
-            default:
-                fieldsContainer.innerHTML = '';
-                break;
+                </div>
+            `;
+        }
+
+        fieldsContainer.innerHTML = html;
+
+        // Add event listeners to update display values
+        this.setupValueDisplayListeners();
+    }
+
+    setupValueDisplayListeners() {
+        const dimmerValue = document.getElementById('dimmerValue');
+        const panValue = document.getElementById('panValue');
+        const tiltValue = document.getElementById('tiltValue');
+
+        if (dimmerValue) {
+            dimmerValue.addEventListener('input', (e) => {
+                const display = document.getElementById('dimmerValueDisplay');
+                if (display) display.textContent = e.target.value + '%';
+            });
+        }
+
+        if (panValue) {
+            panValue.addEventListener('input', (e) => {
+                const display = document.getElementById('panValueDisplay');
+                if (display) display.textContent = e.target.value;
+            });
+        }
+
+        if (tiltValue) {
+            tiltValue.addEventListener('input', (e) => {
+                const display = document.getElementById('tiltValueDisplay');
+                if (display) display.textContent = e.target.value;
+            });
         }
     }
     
@@ -198,52 +300,71 @@ class EventModal {
     }
     
     saveEvent() {
-        const eventData = this.collectEventData();
-        if (!eventData) return;
-        
+        const eventDataArray = this.collectEventData();
+        if (!eventDataArray) return;
+
         if (this.isEditing && window.sequenceEditor) {
-            window.sequenceEditor.updateEvent(this.editingEventId, eventData);
+            // When editing, update the existing event with the first matching type
+            // This assumes we're editing one specific event type at a time
+            window.sequenceEditor.updateEvent(this.editingEventId, eventDataArray[0]);
         } else if (window.sequenceEditor) {
-            window.sequenceEditor.addEvent(eventData);
+            // When adding new, add all event types
+            eventDataArray.forEach(eventData => {
+                window.sequenceEditor.addEvent(eventData);
+            });
         }
-        
+
         this.bootstrapModal.hide();
     }
     
     collectEventData() {
         const time = parseFloat(document.getElementById('eventTime')?.value || 0);
-        const type = document.getElementById('eventType')?.value;
-        
-        if (!type) return null;
-        
-        const eventData = {
-            time,
-            type,
-            device_id: this.getSelectedDevices()[0] || 1 // Use first selected device
-        };
-        
-        switch (type) {
-            case 'dimmer':
-                const dimmerValue = document.getElementById('dimmerValue');
-                eventData.value = dimmerValue ? parseInt(dimmerValue.value) : 100;
-                break;
-            case 'color':
-                const colorValue = document.getElementById('colorValue');
-                const whiteValue = document.getElementById('whiteValue');
-                eventData.color = colorValue ? colorValue.value : '#ffffff';
-                eventData.value = whiteValue ? parseInt(whiteValue.value) : 0;
-                break;
-            case 'position':
-                const panValue = document.getElementById('panValue');
-                const tiltValue = document.getElementById('tiltValue');
-                eventData.value = {
-                    pan: panValue ? parseInt(panValue.value) : 128,
-                    tilt: tiltValue ? parseInt(tiltValue.value) : 128
-                };
-                break;
+        const selectedDeviceId = this.getSelectedDevices()[0];
+
+        if (!selectedDeviceId) return null;
+
+        // Collect all available event data based on which fields are present
+        const events = [];
+
+        // Check for dimmer
+        const dimmerValue = document.getElementById('dimmerValue');
+        if (dimmerValue) {
+            events.push({
+                time,
+                type: 'dimmer',
+                device_id: selectedDeviceId,
+                value: parseInt(dimmerValue.value)
+            });
         }
-        
-        return eventData;
+
+        // Check for color
+        const colorValue = document.getElementById('colorValue');
+        if (colorValue) {
+            events.push({
+                time,
+                type: 'color',
+                device_id: selectedDeviceId,
+                color: colorValue.value
+            });
+        }
+
+        // Check for position
+        const panValue = document.getElementById('panValue');
+        const tiltValue = document.getElementById('tiltValue');
+        if (panValue && tiltValue) {
+            events.push({
+                time,
+                type: 'position',
+                device_id: selectedDeviceId,
+                value: {
+                    pan: parseInt(panValue.value),
+                    tilt: parseInt(tiltValue.value)
+                }
+            });
+        }
+
+        // Return array of events or null if none
+        return events.length > 0 ? events : null;
     }
     
     getSelectedDevices() {
@@ -259,9 +380,12 @@ class EventModal {
         if (form) {
             form.reset();
         }
-        
-        document.getElementById('eventType').value = 'dimmer';
-        this.updateEventFields();
+
+        // Clear event fields
+        const fieldsContainer = document.getElementById('eventFields');
+        if (fieldsContainer) {
+            fieldsContainer.innerHTML = '';
+        }
     }
     
     setPatchedDevices(devices) {

@@ -279,9 +279,31 @@ class LightPreview {
     }
     
     sendDMXUpdate() {
-        // Send DMX data to server (placeholder)
-        // In a real implementation, this would send the current DMX values to the server
-        console.log('Sending DMX update:', this.dmxData);
+        // Build channel map (only non-zero channels to reduce payload)
+        const channels = {};
+        this.dmxData.forEach((value, index) => {
+            if (value > 0) {
+                channels[index + 1] = value; // DMX channels are 1-based
+            }
+        });
+
+        // Send to backend API
+        fetch('/api/set-dmx-channels', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ channels })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                console.error('DMX update failed:', data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error sending DMX update:', error);
+        });
     }
     
     hexToRgb(hex) {

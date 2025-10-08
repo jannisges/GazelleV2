@@ -276,10 +276,9 @@ def stop_playback():
         audio_player.stop()
         time.sleep(0.1)
 
-    # Clear all DMX channels
+    # Clear all DMX channels efficiently
     if dmx_controller:
-        for i in range(512):
-            dmx_controller.set_channel(i + 1, 0)
+        dmx_controller.clear_all()
 
 def pause_playback():
     """Pause current playback"""

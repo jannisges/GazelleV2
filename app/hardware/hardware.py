@@ -1,6 +1,11 @@
 import threading
 import time
 import pygame
+import serial
+import sys
+import fcntl
+import termios
+import struct
 
 try:
     import RPi.GPIO as GPIO
@@ -9,78 +14,145 @@ except ImportError:
     RPI_AVAILABLE = False
 
 # GPIO Configuration
-DMX_PIN = 14
 BUTTON_PIN = 18
 
+# DMX UART Configuration
+DMX_UART_PORT = '/dev/ttyAMA0'
+DMX_BAUDRATE = 250000
+DMX_BREAK_BAUDRATE = 90000  # For generating the break signal
+
 class DMXController:
+    """
+    DMX512 Controller using UART hardware on Raspberry Pi
+    Sends DMX frames at approximately 44Hz refresh rate
+    """
     def __init__(self):
-        self.dmx_data = [0] * 512
+        self.dmx_data = bytearray(512)  # Use bytearray for better performance
         self.running = False
         self.thread = None
-    
+        self.serial_port = None
+        self.lock = threading.Lock()  # Thread-safe channel updates
+        self._init_uart()
+
+    def _init_uart(self):
+        """Initialize the UART serial port for DMX transmission"""
+        try:
+            self.serial_port = serial.Serial(
+                port=DMX_UART_PORT,
+                baudrate=DMX_BAUDRATE,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_TWO,
+                timeout=None,
+                write_timeout=None,
+                xonxoff=False,
+                rtscts=False,
+                dsrdtr=False
+            )
+            # Clear buffers
+            self.serial_port.reset_output_buffer()
+            self.serial_port.reset_input_buffer()
+            print(f"DMX UART initialized on {DMX_UART_PORT} at {DMX_BAUDRATE} baud")
+        except Exception as e:
+            print(f"Failed to initialize DMX UART: {e}")
+            self.serial_port = None
+
     def start(self):
-        if not self.running:
+        """Start the DMX output thread"""
+        if not self.running and self.serial_port:
             self.running = True
-            self.thread = threading.Thread(target=self._output_loop)
-            self.thread.daemon = True
+            self.thread = threading.Thread(target=self._output_loop, daemon=True)
             self.thread.start()
-    
+            print("DMX output started")
+
     def stop(self):
+        """Stop the DMX output thread and close serial port"""
         self.running = False
-        if self.thread:
-            self.thread.join()
-    
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=1.0)
+        if self.serial_port and self.serial_port.is_open:
+            self.serial_port.close()
+        print("DMX output stopped")
+
     def set_channel(self, channel, value):
+        """Set a DMX channel value (1-512)"""
         if 1 <= channel <= 512:
-            self.dmx_data[channel - 1] = max(0, min(255, int(value)))
-    
+            with self.lock:
+                self.dmx_data[channel - 1] = max(0, min(255, int(value)))
+
     def get_channel(self, channel):
+        """Get a DMX channel value (1-512)"""
         if 1 <= channel <= 512:
-            return self.dmx_data[channel - 1]
+            with self.lock:
+                return self.dmx_data[channel - 1]
         return 0
-    
+
+    def set_channels(self, channel_dict):
+        """Set multiple channels at once for better performance"""
+        with self.lock:
+            for channel, value in channel_dict.items():
+                if 1 <= channel <= 512:
+                    self.dmx_data[channel - 1] = max(0, min(255, int(value)))
+
+    def clear_all(self):
+        """Clear all DMX channels to 0 efficiently"""
+        with self.lock:
+            self.dmx_data = bytearray(512)  # Reset all to 0 instantly
+
     def _output_loop(self):
+        """Main DMX transmission loop - runs at ~44Hz"""
+        frame_time = 0.0227  # ~44Hz (22.7ms per frame)
+
         while self.running:
-            if RPI_AVAILABLE:
+            start_time = time.time()
+
+            try:
                 self._send_dmx_frame()
-            time.sleep(0.04)  # ~25 FPS
-    
+            except Exception as e:
+                print(f"Error in DMX output loop: {e}")
+
+            # Maintain consistent frame rate
+            elapsed = time.time() - start_time
+            sleep_time = frame_time - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
     def _send_dmx_frame(self):
-        if not RPI_AVAILABLE:
+        """Send a complete DMX512 frame"""
+        if not self.serial_port or not self.serial_port.is_open:
             return
-        
-        # DMX Break
-        GPIO.output(DMX_PIN, GPIO.LOW)
-        time.sleep(0.000088)  # 88µs break
-        
-        # DMX Mark After Break
-        GPIO.output(DMX_PIN, GPIO.HIGH)
-        time.sleep(0.000008)  # 8µs MAB
-        
-        # Send Start Code (0)
-        self._send_byte(0)
-        
-        # Send DMX Data
-        for value in self.dmx_data:
-            self._send_byte(value)
-    
-    def _send_byte(self, byte_value):
-        if not RPI_AVAILABLE:
-            return
-        
-        # Start bit
-        GPIO.output(DMX_PIN, GPIO.LOW)
-        time.sleep(0.000004)  # 4µs per bit at 250kbps
-        
-        # Data bits (LSB first)
-        for i in range(8):
-            bit = (byte_value >> i) & 1
-            GPIO.output(DMX_PIN, GPIO.HIGH if bit else GPIO.LOW)
-            time.sleep(0.000004)
-        
-        # Stop bits
-        GPIO.output(DMX_PIN, GPIO.HIGH)
-        time.sleep(0.000008)  # 2 stop bits
+
+        try:
+            # Build DMX packet
+            with self.lock:
+                packet = bytearray([0])  # Start code
+                packet.extend(self.dmx_data)  # Copy all 512 channels
+
+            fd = self.serial_port.fileno()
+
+            # Save current terminal settings BEFORE break
+            saved_attrs = termios.tcgetattr(fd)
+
+            # Send BREAK using ioctl
+            TIOCSBRK = 0x5427
+            TIOCCBRK = 0x5428
+
+            fcntl.ioctl(fd, TIOCSBRK)
+            time.sleep(0.00009)  # 90µs break
+            fcntl.ioctl(fd, TIOCCBRK)
+
+            # RESTORE terminal settings immediately after break
+            termios.tcsetattr(fd, termios.TCSANOW, saved_attrs)
+
+            # Mark After Break
+            time.sleep(0.00001)  # 10µs
+
+            # Write data
+            self.serial_port.write(packet)
+            self.serial_port.flush()
+
+        except Exception as e:
+            print(f"[ERROR] DMX: {e}")
 
 class AudioPlayer:
     def __init__(self):
@@ -173,7 +245,7 @@ def setup_gpio():
     """Initialize GPIO pins"""
     if RPI_AVAILABLE:
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(DMX_PIN, GPIO.OUT)
+        # DMX now uses UART (ttyAMA0) instead of GPIO bit-banging
         # BUTTON_PIN setup moved to playback service to avoid conflicts
 
 def cleanup_gpio():

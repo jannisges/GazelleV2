@@ -127,12 +127,11 @@ def seek_sequence():
 @playback_api.route('/api/blackout', methods=['POST'])
 def blackout():
     try:
-        # Set all channels to 0
-        for i in range(512):
-            playback.dmx_controller.set_channel(i + 1, 0)
-        
+        # Set all channels to 0 efficiently
+        playback.dmx_controller.clear_all()
+
         return jsonify({'success': True})
-    
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -199,5 +198,49 @@ def get_dmx_status():
             'channels': playback.dmx_controller.dmx_data,
             'timestamp': time.time()
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@playback_api.route('/api/set-dmx-channels', methods=['POST'])
+def set_dmx_channels():
+    """Set multiple DMX channels at once (for editor preview)"""
+    try:
+        data = request.get_json()
+        channels = data.get('channels', {})
+
+        # Update DMX channels
+        for channel_str, value in channels.items():
+            channel = int(channel_str)
+            if 1 <= channel <= 512:
+                playback.dmx_controller.set_channel(channel, value)
+
+        return jsonify({'success': True})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@playback_api.route('/api/test-dmx', methods=['POST'])
+def test_dmx():
+    """Test DMX output by setting channel 1 to full"""
+    try:
+        data = request.get_json()
+        channel = data.get('channel', 1)
+        value = data.get('value', 255)
+
+        print(f"[TEST] Setting DMX channel {channel} to {value}")
+        playback.dmx_controller.set_channel(channel, value)
+
+        # Wait a moment and read it back
+        time.sleep(0.1)
+        actual_value = playback.dmx_controller.get_channel(channel)
+
+        return jsonify({
+            'success': True,
+            'channel': channel,
+            'requested_value': value,
+            'actual_value': actual_value,
+            'serial_port_active': playback.dmx_controller.serial_port is not None
+        })
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
