@@ -54,6 +54,7 @@ class EventModal {
         this.editingEventId = event.id;
 
         document.getElementById('eventTime').value = event.time;
+        document.getElementById('eventEndTime').value = event.end_time || '';
 
         this.loadDevicesForEvent();
 
@@ -219,6 +220,7 @@ class EventModal {
 
     setupValueDisplayListeners() {
         const dimmerValue = document.getElementById('dimmerValue');
+        const colorValue = document.getElementById('colorValue');
         const panValue = document.getElementById('panValue');
         const tiltValue = document.getElementById('tiltValue');
 
@@ -226,6 +228,16 @@ class EventModal {
             dimmerValue.addEventListener('input', (e) => {
                 const display = document.getElementById('dimmerValueDisplay');
                 if (display) display.textContent = e.target.value + '%';
+
+                // Trigger live DMX output during playback
+                this.triggerLiveDMXOutput();
+            });
+        }
+
+        if (colorValue) {
+            colorValue.addEventListener('input', (e) => {
+                // Trigger live DMX output during playback
+                this.triggerLiveDMXOutput();
             });
         }
 
@@ -233,6 +245,9 @@ class EventModal {
             panValue.addEventListener('input', (e) => {
                 const display = document.getElementById('panValueDisplay');
                 if (display) display.textContent = e.target.value;
+
+                // Trigger live DMX output during playback
+                this.triggerLiveDMXOutput();
             });
         }
 
@@ -240,7 +255,131 @@ class EventModal {
             tiltValue.addEventListener('input', (e) => {
                 const display = document.getElementById('tiltValueDisplay');
                 if (display) display.textContent = e.target.value;
+
+                // Trigger live DMX output during playback
+                this.triggerLiveDMXOutput();
             });
+        }
+    }
+
+    triggerLiveDMXOutput() {
+        console.log('[DMX] triggerLiveDMXOutput called');
+
+        // Check if playback controller exists
+        if (!window.playbackController) {
+            console.log('[DMX] No playback controller found');
+            return;
+        }
+
+        // Check if currently playing
+        const isPlaying = window.playbackController.isCurrentlyPlaying();
+        console.log('[DMX] Is playing:', isPlaying);
+
+        if (!isPlaying) {
+            console.log('[DMX] Not playing - skipping DMX output');
+            return;
+        }
+
+        const eventDataArray = this.collectEventData();
+        console.log('[DMX] Collected event data:', eventDataArray);
+
+        if (!eventDataArray) {
+            console.log('[DMX] No event data collected');
+            return;
+        }
+
+        // Send DMX commands for each event type
+        eventDataArray.forEach(eventData => {
+            this.executeDMXEvent(eventData);
+        });
+    }
+
+    executeDMXEvent(eventData) {
+        const selectedDeviceId = eventData.device_id;
+        const selectedPatch = this.patchedDevices.find(p => p.id === selectedDeviceId);
+
+        if (!selectedPatch) {
+            console.log('[DMX] No patched device found for ID:', selectedDeviceId);
+            return;
+        }
+
+        console.log('[DMX] Executing event for device:', selectedPatch.device.name);
+        console.log('[DMX] Event data:', eventData);
+        console.log('[DMX] Device channels:', selectedPatch.device.channels);
+
+        const channels = selectedPatch.device.channels;
+        const startAddress = selectedPatch.start_address;
+        const dmxChannels = {};
+
+        // Build DMX channel updates based on event type
+        switch (eventData.type) {
+            case 'dimmer':
+                channels.forEach((channel, index) => {
+                    if (channel.type === 'dimmer_channel') {
+                        const dmxAddress = startAddress + index;
+                        const dmxValue = Math.round(eventData.value * 255 / 100);
+                        dmxChannels[dmxAddress] = dmxValue;
+                        console.log(`[DMX] Dimmer: CH${dmxAddress} = ${dmxValue}`);
+                    }
+                });
+                break;
+
+            case 'color':
+                const hex = eventData.color.replace('#', '');
+                const r = parseInt(hex.substring(0, 2), 16);
+                const g = parseInt(hex.substring(2, 4), 16);
+                const b = parseInt(hex.substring(4, 6), 16);
+
+                console.log(`[DMX] Color RGB: ${r}, ${g}, ${b}`);
+
+                channels.forEach((channel, index) => {
+                    const dmxAddress = startAddress + index;
+                    if (channel.type === 'red_channel') {
+                        dmxChannels[dmxAddress] = r;
+                        console.log(`[DMX] Red: CH${dmxAddress} = ${r}`);
+                    } else if (channel.type === 'green_channel') {
+                        dmxChannels[dmxAddress] = g;
+                        console.log(`[DMX] Green: CH${dmxAddress} = ${g}`);
+                    } else if (channel.type === 'blue_channel') {
+                        dmxChannels[dmxAddress] = b;
+                        console.log(`[DMX] Blue: CH${dmxAddress} = ${b}`);
+                    }
+                });
+                break;
+
+            case 'position':
+                channels.forEach((channel, index) => {
+                    const dmxAddress = startAddress + index;
+                    if (channel.type === 'pan') {
+                        dmxChannels[dmxAddress] = eventData.value.pan;
+                        console.log(`[DMX] Pan: CH${dmxAddress} = ${eventData.value.pan}`);
+                    } else if (channel.type === 'tilt') {
+                        dmxChannels[dmxAddress] = eventData.value.tilt;
+                        console.log(`[DMX] Tilt: CH${dmxAddress} = ${eventData.value.tilt}`);
+                    }
+                });
+                break;
+        }
+
+        // Send to backend
+        if (Object.keys(dmxChannels).length > 0) {
+            console.log('[DMX] Sending channels to backend:', dmxChannels);
+            fetch('/api/set-dmx-channels', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ channels: dmxChannels })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('[DMX] Backend response:', data);
+            })
+            .catch(error => {
+                console.error('[DMX] Error setting DMX channels:', error);
+            });
+        } else {
+            console.log('[DMX] No DMX channels to send');
         }
     }
     
@@ -319,6 +458,7 @@ class EventModal {
     
     collectEventData() {
         const time = parseFloat(document.getElementById('eventTime')?.value || 0);
+        const endTime = parseFloat(document.getElementById('eventEndTime')?.value || 0);
         const selectedDeviceId = this.getSelectedDevices()[0];
 
         if (!selectedDeviceId) return null;
@@ -331,6 +471,7 @@ class EventModal {
         if (dimmerValue) {
             events.push({
                 time,
+                end_time: endTime,
                 type: 'dimmer',
                 device_id: selectedDeviceId,
                 value: parseInt(dimmerValue.value)
@@ -342,6 +483,7 @@ class EventModal {
         if (colorValue) {
             events.push({
                 time,
+                end_time: endTime,
                 type: 'color',
                 device_id: selectedDeviceId,
                 color: colorValue.value
@@ -354,6 +496,7 @@ class EventModal {
         if (panValue && tiltValue) {
             events.push({
                 time,
+                end_time: endTime,
                 type: 'position',
                 device_id: selectedDeviceId,
                 value: {

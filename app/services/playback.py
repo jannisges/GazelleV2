@@ -206,63 +206,164 @@ def play_sequence(sequence, start_time=0):
 def sequence_playback_loop(sequence, start_time_offset=0):
     """Main loop for sequence playback"""
     global is_playing
-    
+
     events = sequence.get_events()
     events.sort(key=lambda x: x.get('time', 0))
-    
+
+    print(f"[PLAYBACK] Starting sequence loop with {len(events)} events")
+
     start_time = time.time()
     event_index = 0
-    
+    active_events = []  # Track events that need to be cleared at end_time
+
     # Skip events that are before the start time offset
     while event_index < len(events) and events[event_index].get('time', 0) < start_time_offset:
         event_index += 1
-    
-    while is_playing and event_index < len(events):
+
+    print(f"[PLAYBACK] Starting from event index {event_index}")
+
+    while is_playing and (event_index < len(events) or active_events):
         current_time = time.time() - start_time + start_time_offset
-        event = events[event_index]
-        
-        if current_time >= event.get('time', 0):
-            # Execute event
-            execute_dmx_event(event)
-            event_index += 1
-        
+
+        # Execute new events
+        while event_index < len(events):
+            event = events[event_index]
+            if current_time >= event.get('time', 0):
+                print(f"[PLAYBACK] Executing event {event_index}: {event}")
+                execute_dmx_event(event)
+
+                # Track all events for cleanup at end_time
+                active_events.append(event)
+                event_index += 1
+            else:
+                break
+
+        # Check for events that need to be cleared
+        events_to_remove = []
+        for active_event in active_events:
+            end_time = active_event.get('end_time')
+            if end_time is not None and current_time >= end_time:
+                print(f"[PLAYBACK] Clearing event at end_time: {active_event}")
+                clear_dmx_event(active_event)
+                events_to_remove.append(active_event)
+            
+        # Remove cleared events from active list
+        for event in events_to_remove:
+            active_events.remove(event)
+
         time.sleep(0.01)  # 10ms precision
+
+    print(f"[PLAYBACK] Sequence loop finished")
 
 def execute_dmx_event(event):
     """Execute a single DMX event"""
     global flask_app
-    
-    device_id = event.get('device_id')
+
+    patched_device_id = event.get('device_id')
     event_type = event.get('type')
     value = event.get('value', 0)
-    
+
+    print(f"[DMX] Executing event - patched_device_id: {patched_device_id}, type: {event_type}, value: {value}")
+
     if not flask_app:
+        print("[DMX] ERROR: No flask_app")
         return
-    
+
     with flask_app.app_context():
-        patched_device = PatchedDevice.query.filter_by(device_id=device_id).first()
+        # Query by patched device ID (not device template ID)
+        patched_device = db.session.get(PatchedDevice, patched_device_id)
         if not patched_device:
+            print(f"[DMX] ERROR: No patched device found for ID {patched_device_id}")
             return
-        
+
         device = patched_device.device
         channels = device.get_channels()
-    
+
+        print(f"[DMX] Found device: {device.name}, start_address: {patched_device.start_address}, channels: {len(channels)}")
+
         for i, channel in enumerate(channels):
             dmx_address = patched_device.start_address + i
             channel_type = channel.get('type')
-            
+
             if event_type == 'dimmer' and channel_type == 'dimmer_channel':
-                dmx_controller.set_channel(dmx_address, int(value * 255 / 100))
+                dmx_value = int(value * 255 / 100)
+                print(f"[DMX] Setting dimmer CH{dmx_address} = {dmx_value}")
+                dmx_controller.set_channel(dmx_address, dmx_value)
             elif event_type == 'color':
-                color = event.get('color', {})
+                # Handle both hex string and RGB dict formats
+                color_value = event.get('color')
+                if isinstance(color_value, str):
+                    # Convert hex to RGB
+                    hex_color = color_value.lstrip('#')
+                    r = int(hex_color[0:2], 16)
+                    g = int(hex_color[2:4], 16)
+                    b = int(hex_color[4:6], 16)
+                    color = {'r': r, 'g': g, 'b': b}
+                    print(f"[DMX] Converted hex {color_value} to RGB: r={r}, g={g}, b={b}")
+                else:
+                    color = color_value or {}
+
                 if channel_type == 'red_channel':
+                    print(f"[DMX] Setting red CH{dmx_address} = {color.get('r', 0)}")
                     dmx_controller.set_channel(dmx_address, color.get('r', 0))
                 elif channel_type == 'green_channel':
+                    print(f"[DMX] Setting green CH{dmx_address} = {color.get('g', 0)}")
                     dmx_controller.set_channel(dmx_address, color.get('g', 0))
                 elif channel_type == 'blue_channel':
+                    print(f"[DMX] Setting blue CH{dmx_address} = {color.get('b', 0)}")
                     dmx_controller.set_channel(dmx_address, color.get('b', 0))
                 elif channel_type == 'white_channel':
+                    print(f"[DMX] Setting white CH{dmx_address} = {color.get('w', 0)}")
                     dmx_controller.set_channel(dmx_address, color.get('w', 0))
+            elif event_type == 'position':
+                if channel_type == 'pan':
+                    print(f"[DMX] Setting pan CH{dmx_address} = {value.get('pan', 0)}")
+                    dmx_controller.set_channel(dmx_address, value.get('pan', 0))
+                elif channel_type == 'tilt':
+                    print(f"[DMX] Setting tilt CH{dmx_address} = {value.get('tilt', 0)}")
+                    dmx_controller.set_channel(dmx_address, value.get('tilt', 0))
+
+def clear_dmx_event(event):
+    """Clear DMX channels for an event (set to 0)"""
+    global flask_app
+
+    patched_device_id = event.get('device_id')
+    event_type = event.get('type')
+
+    print(f"[DMX] Clearing event - patched_device_id: {patched_device_id}, type: {event_type}")
+
+    if not flask_app:
+        print("[DMX] ERROR: No flask_app")
+        return
+
+    with flask_app.app_context():
+        # Query by patched device ID (not device template ID)
+        patched_device = db.session.get(PatchedDevice, patched_device_id)
+        if not patched_device:
+            print(f"[DMX] ERROR: No patched device found for ID {patched_device_id}")
+            return
+
+        device = patched_device.device
+        channels = device.get_channels()
+
+        print(f"[DMX] Clearing device: {device.name}, start_address: {patched_device.start_address}, channels: {len(channels)}")
+
+        for i, channel in enumerate(channels):
+            dmx_address = patched_device.start_address + i
+            channel_type = channel.get('type')
+
+            # Clear channels based on event type
+            if event_type == 'dimmer' and channel_type == 'dimmer_channel':
+                print(f"[DMX] Clearing dimmer CH{dmx_address} = 0")
+                dmx_controller.set_channel(dmx_address, 0)
+            elif event_type == 'color':
+                if channel_type in ['red_channel', 'green_channel', 'blue_channel', 'white_channel']:
+                    print(f"[DMX] Clearing color channel CH{dmx_address} = 0")
+                    dmx_controller.set_channel(dmx_address, 0)
+            elif event_type == 'position':
+                if channel_type in ['pan', 'tilt']:
+                    print(f"[DMX] Clearing position channel CH{dmx_address} = 0")
+                    dmx_controller.set_channel(dmx_address, 0)
 
 def stop_playback():
     """Stop current playback"""
