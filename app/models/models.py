@@ -10,13 +10,20 @@ class Device(db.Model):
     channels = db.Column(db.Text)  # JSON string
     shape = db.Column(db.String(20), default='circle')  # circle, square
     color = db.Column(db.String(7), default='#ffffff')  # hex color for outline
+    default_values = db.Column(db.Text)  # JSON string - default DMX values for each channel
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     def get_channels(self):
         return json.loads(self.channels) if self.channels else []
-    
+
     def set_channels(self, channels):
         self.channels = json.dumps(channels)
+
+    def get_default_values(self):
+        return json.loads(self.default_values) if self.default_values else []
+
+    def set_default_values(self, values):
+        self.default_values = json.dumps(values)
 
 class PatchedDevice(db.Model):
     id = db.Column(db.Integer, primary_key=True)

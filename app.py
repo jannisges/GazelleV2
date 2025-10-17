@@ -149,6 +149,12 @@ if __name__ == '__main__':
     # Start DMX controller
     dmx_controller.start()
 
+    # Apply default values on startup
+    import time
+    time.sleep(0.2)  # Wait for DMX controller to fully initialize
+    with app.app_context():
+        playback.apply_default_values()
+
     # Start button handler thread
     if RPI_AVAILABLE:
         button_thread = threading.Thread(target=playback.button_handler)

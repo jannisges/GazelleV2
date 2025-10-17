@@ -369,8 +369,32 @@ def clear_dmx_event(event):
                     print(f"[DMX] Clearing position channel CH{dmx_address} = 0")
                     dmx_controller.set_channel(dmx_address, 0)
 
+def apply_default_values():
+    """Apply default DMX values to all patched devices when no sequence is playing"""
+    global flask_app, dmx_controller
+
+    if not flask_app or not dmx_controller:
+        return
+
+    print("[DMX] Applying default values to patched devices")
+
+    with flask_app.app_context():
+        patched_devices = PatchedDevice.query.all()
+        for patch in patched_devices:
+            device = patch.device
+            channels = device.get_channels()
+            default_values = device.get_default_values()
+
+            # Apply default values for each channel
+            for i, channel in enumerate(channels):
+                dmx_address = patch.start_address + i
+                # Use default value if available, otherwise use 0
+                default_value = default_values[i] if i < len(default_values) else 0
+                dmx_controller.set_channel(dmx_address, default_value)
+                print(f"[DMX] Setting default CH{dmx_address} = {default_value}")
+
 def stop_playback():
-    """Stop current playback"""
+    """Stop current playback and restore default values"""
     global is_playing, current_sequence
 
     print("[INFO] Stopping playback")
@@ -381,9 +405,12 @@ def stop_playback():
         audio_player.stop()
         time.sleep(0.1)
 
-    # Clear all DMX channels efficiently
+    # Clear all DMX channels first
     if dmx_controller:
         dmx_controller.clear_all()
+        time.sleep(0.05)  # Brief delay to ensure clear is applied
+        # Apply default values
+        apply_default_values()
 
 def pause_playback():
     """Pause current playback"""

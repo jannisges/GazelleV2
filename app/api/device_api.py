@@ -11,11 +11,12 @@ def save_device():
         channels = data.get('channels', [])
         shape = data.get('shape', 'circle')
         color = data.get('color', '#ffffff')
+        default_values = data.get('default_values', [])
         device_id = data.get('id')
-        
+
         if not name:
             return jsonify({'error': 'Device name is required'}), 400
-        
+
         if device_id:
             # Update existing device
             device = db.session.get(Device, device_id)
@@ -25,15 +26,17 @@ def save_device():
             device.shape = shape
             device.color = color
             device.set_channels(channels)
+            device.set_default_values(default_values)
         else:
             # Create new device
             device = Device(name=name, shape=shape, color=color)
             device.set_channels(channels)
+            device.set_default_values(default_values)
             db.session.add(device)
-        
+
         db.session.commit()
         return jsonify({'success': True, 'device_id': device.id})
-    
+
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
@@ -44,7 +47,7 @@ def get_device(device_id):
         device = db.session.get(Device, device_id)
         if not device:
             return jsonify({'error': 'Device not found'}), 404
-        
+
         return jsonify({
             'success': True,
             'device': {
@@ -52,10 +55,11 @@ def get_device(device_id):
                 'name': device.name,
                 'channels': device.channels,
                 'shape': device.shape,
-                'color': device.color
+                'color': device.color,
+                'default_values': device.default_values
             }
         })
-    
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -235,7 +239,7 @@ def get_patched_devices():
     try:
         patches = PatchedDevice.query.all()
         result = []
-        
+
         for patch in patches:
             result.append({
                 'id': patch.id,
@@ -248,12 +252,13 @@ def get_patched_devices():
                     'name': patch.device.name,
                     'channels': patch.device.get_channels(),
                     'shape': patch.device.shape or 'circle',
-                    'color': patch.device.color or '#ffffff'
+                    'color': patch.device.color or '#ffffff',
+                    'default_values': patch.device.get_default_values()
                 }
             })
-        
+
         return jsonify(result)
-    
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

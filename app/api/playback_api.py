@@ -127,8 +127,15 @@ def seek_sequence():
 @playback_api.route('/api/blackout', methods=['POST'])
 def blackout():
     try:
+        data = request.get_json() or {}
+        restore_defaults = data.get('restore_defaults', False)
+
         # Set all channels to 0 efficiently
         playback.dmx_controller.clear_all()
+
+        # Optionally restore default values
+        if restore_defaults:
+            playback.apply_default_values()
 
         return jsonify({'success': True})
 

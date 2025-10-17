@@ -73,43 +73,51 @@ function addChannel() {
     const channelDiv = document.createElement('div');
     channelDiv.className = 'channel-item';
     channelDiv.dataset.channelId = channelCount;
-    
+
     channelDiv.innerHTML = `
-        <label>Channel ${channelCount}:</label>
-        <select class="form-select" name="channel_${channelCount}_type" onchange="updatePreview()">
-            <option value="dimmer_channel">Dimmer</option>
-            <option value="dimmer_fine">Dimmer_fine</option>
-            <option value="red_channel">Red</option>
-            <option value="green_channel">Green</option>
-            <option value="blue_channel">Blue</option>
-            <option value="white_channel">White</option>
-            <option value="pan">Pan</option>
-            <option value="pan_fine">Pan_fine</option>
-            <option value="tilt">Tilt</option>
-            <option value="tilt_fine">Tilt_fine</option>
-            <option value="gobo1">Gobo1</option>
-            <option value="gobo2">Gobo2</option>
-            <option value="gobo_rotation">Gobo_rotation</option>
-            <option value="gobo_rotation_fine">Gobo_rotation_fine</option>
-            <option value="color_wheel">Color_Wheel</option>
-            <option value="strobe">Strobe</option>
-            <option value="prism">Prism</option>
-            <option value="prisma_rotation">Prisma_rotation</option>
-            <option value="frost">Frost</option>
-            <option value="zoom">Zoom</option>
-            <option value="zoom_fine">Zoom_fine</option>
-            <option value="focus">Focus</option>
-            <option value="focus_fine">Focus_fine</option>
-            <option value="macro">Macro</option>
-            <option value="special_functions">Special_functions</option>
-            <option value="reset">Reset</option>
-            <option value="dummy">Dummy/Other</option>
-        </select>
-        <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeChannel(${channelCount})">
-            <i class="bi bi-trash"></i>
-        </button>
+        <div class="d-flex align-items-center gap-2">
+            <label class="mb-0" style="min-width: 80px;">Channel ${channelCount}:</label>
+            <select class="form-select" name="channel_${channelCount}_type" onchange="updatePreview()">
+                <option value="dimmer_channel">Dimmer</option>
+                <option value="dimmer_fine">Dimmer_fine</option>
+                <option value="red_channel">Red</option>
+                <option value="green_channel">Green</option>
+                <option value="blue_channel">Blue</option>
+                <option value="white_channel">White</option>
+                <option value="pan">Pan</option>
+                <option value="pan_fine">Pan_fine</option>
+                <option value="tilt">Tilt</option>
+                <option value="tilt_fine">Tilt_fine</option>
+                <option value="gobo1">Gobo1</option>
+                <option value="gobo2">Gobo2</option>
+                <option value="gobo_rotation">Gobo_rotation</option>
+                <option value="gobo_rotation_fine">Gobo_rotation_fine</option>
+                <option value="color_wheel">Color_Wheel</option>
+                <option value="strobe">Strobe</option>
+                <option value="prism">Prism</option>
+                <option value="prisma_rotation">Prisma_rotation</option>
+                <option value="frost">Frost</option>
+                <option value="zoom">Zoom</option>
+                <option value="zoom_fine">Zoom_fine</option>
+                <option value="focus">Focus</option>
+                <option value="focus_fine">Focus_fine</option>
+                <option value="macro">Macro</option>
+                <option value="special_functions">Special_functions</option>
+                <option value="reset">Reset</option>
+                <option value="dummy">Dummy/Other</option>
+            </select>
+            <div class="d-flex align-items-center gap-1" style="min-width: 200px;">
+                <label class="mb-0" style="min-width: 70px; font-size: 0.9em;">Default:</label>
+                <input type="number" class="form-control form-control-sm" name="channel_${channelCount}_default"
+                       min="0" max="255" value="0" style="max-width: 80px;"
+                       placeholder="0-255" title="Default DMX value (0-255)">
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeChannel(${channelCount})">
+                <i class="bi bi-trash"></i>
+            </button>
+        </div>
     `;
-    
+
     document.getElementById('channelList').appendChild(channelDiv);
     updatePreview();
 }
@@ -202,40 +210,47 @@ function loadTemplate(templateKey) {
 function setupFormSubmission() {
     document.getElementById('deviceForm').addEventListener('submit', function(e) {
         e.preventDefault();
-        
+
         const formData = new FormData();
         const deviceName = document.getElementById('deviceName').value;
-        
+
         if (!deviceName) {
             DMXUtils.showNotification('Please enter a device name', 'error');
             return;
         }
-        
+
         const channels = [];
+        const defaultValues = [];
         document.querySelectorAll('.channel-item').forEach((item, index) => {
             const select = item.querySelector('select');
+            const defaultInput = item.querySelector('input[type="number"]');
+            const defaultValue = parseInt(defaultInput.value) || 0;
+
             channels.push({
                 type: select.value,
                 name: `Channel ${index + 1}`
             });
+
+            defaultValues.push(defaultValue);
         });
-        
+
         if (channels.length === 0) {
             DMXUtils.showNotification('Please add at least one channel', 'error');
             return;
         }
-        
+
         const deviceData = {
             name: deviceName,
             channels: channels,
+            default_values: defaultValues,
             shape: document.getElementById('deviceShape').value,
             color: document.getElementById('deviceColor').value
         };
-        
+
         if (currentDeviceId) {
             deviceData.id = currentDeviceId;
         }
-        
+
         DMXUtils.apiCall('/api/save-device', 'POST', deviceData)
         .then(response => {
             if (response.success) {
@@ -256,38 +271,45 @@ function setupFormSubmission() {
 
 function loadDevice(deviceId) {
     currentDeviceId = deviceId;
-    
+
     DMXUtils.apiCall(`/api/get-device/${deviceId}`)
     .then(response => {
         if (response.success) {
             const device = response.device;
-            
+
             // Set device name
             document.getElementById('deviceName').value = device.name;
-            
+
             // Set device shape and color
             const deviceShape = device.shape || 'circle';
             document.getElementById('deviceShape').value = deviceShape;
             document.getElementById('deviceColor').value = device.color || '#ffffff';
-            
+
             // Update shape button selection
             document.querySelectorAll('.shape-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
             document.querySelector(`[data-shape="${deviceShape}"]`).classList.add('active');
-            
+
             // Clear existing channels
             document.getElementById('channelList').innerHTML = '';
             channelCount = 0;
-            
-            // Load device channels
+
+            // Load device channels and default values
             const channels = JSON.parse(device.channels || '[]');
-            channels.forEach(channel => {
+            const defaultValues = JSON.parse(device.default_values || '[]');
+            channels.forEach((channel, index) => {
                 addChannel();
-                const lastSelect = document.querySelector('.channel-item:last-child select');
+                const lastChannelItem = document.querySelector('.channel-item:last-child');
+                const lastSelect = lastChannelItem.querySelector('select');
+                const lastDefaultInput = lastChannelItem.querySelector('input[type="number"]');
+
                 lastSelect.value = channel.type;
+                if (defaultValues[index] !== undefined) {
+                    lastDefaultInput.value = defaultValues[index];
+                }
             });
-            
+
             updatePreview();
         } else {
             DMXUtils.showNotification('Error loading device: ' + response.error, 'error');
