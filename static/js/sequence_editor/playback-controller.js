@@ -9,7 +9,9 @@ class PlaybackController {
         this.playbackInterval = null;
         this.currentSong = null;
         this.currentSequence = { events: [] };
-        
+        this.activeEvents = new Set(); // Track currently active events
+        this.lastCheckedTime = 0; // Track last event check time
+
         this.setupEventListeners();
     }
     
@@ -202,37 +204,43 @@ class PlaybackController {
     
     updateClientPosition() {
         if (!this.isPlaying) return;
-        
+
         // Calculate current position based on elapsed time since play started
         const elapsedMs = Date.now() - this.playStartTime;
         const elapsedSeconds = elapsedMs / 1000;
         this.currentPosition = this.playStartPosition + elapsedSeconds;
-        
+
         // Stop if we've reached the end
         if (this.currentSong && this.currentPosition >= this.currentSong.duration) {
             this.currentPosition = this.currentSong.duration;
             this.isPlaying = false;
             this.stopPlaybackTracking();
             this.updatePlayButton();
-            
+
+            // Reset all active events when playback ends
+            this.resetAllActiveEvents();
+
             // Set stopped state for components
             if (window.sequenceEditor) {
                 window.sequenceEditor.setPlaying(false);
             }
             return;
         }
-        
+
+        // Check for event start/end transitions
+        this.checkEventTransitions(this.currentPosition);
+
         // Throttle UI updates to reduce load (max 20fps for UI updates)
         const now = Date.now();
         if (now - this.lastUIUpdate < 50) {
             return; // Skip this update cycle
         }
         this.lastUIUpdate = now;
-        
+
         // Update UI elements
         this.updatePositionDisplay(this.currentPosition);
         this.updateSynchronizedComponents(this.currentPosition);
-        
+
         // Set playing state for waveform renderer and sequence editor
         if (window.waveformRenderer) {
             window.waveformRenderer.setPlaying(true);
@@ -255,7 +263,10 @@ class PlaybackController {
             clearInterval(this.playbackInterval);
             this.playbackInterval = null;
         }
-        
+
+        // Reset all active events when stopping
+        this.resetAllActiveEvents();
+
         // Ensure proper cleanup of animation loops
         if (window.waveformRenderer) {
             window.waveformRenderer.setPlaying(false);
@@ -307,5 +318,121 @@ class PlaybackController {
     
     isCurrentlyPlaying() {
         return this.isPlaying;
+    }
+
+    checkEventTransitions(currentTime) {
+        if (!this.currentSequence || !this.currentSequence.events) return;
+
+        // Check all events for start/end transitions
+        this.currentSequence.events.forEach(event => {
+            const eventEndTime = event.time + (event.duration || 2.0);
+            const eventId = event.id;
+
+            // Check if event should be active
+            const shouldBeActive = currentTime >= event.time && currentTime < eventEndTime;
+
+            if (shouldBeActive && !this.activeEvents.has(eventId)) {
+                // Event just started - it's already handled by backend
+                this.activeEvents.add(eventId);
+                console.log('[DMX] Event', eventId, 'started at', currentTime);
+            } else if (!shouldBeActive && this.activeEvents.has(eventId)) {
+                // Event just ended - reset DMX
+                this.activeEvents.delete(eventId);
+                console.log('[DMX] Event', eventId, 'ended at', currentTime, '- resetting');
+                this.resetEventDMX(event);
+            }
+        });
+    }
+
+    resetEventDMX(event) {
+        console.log('[DMX Reset] Resetting event:', event.id, 'type:', event.type);
+
+        // Get patched devices info
+        if (!window.eventModal || !window.eventModal.patchedDevices) {
+            console.warn('[DMX Reset] No patched devices available');
+            return;
+        }
+
+        const patchedDevices = window.eventModal.patchedDevices;
+        const selectedPatch = patchedDevices.find(p => p.id === event.device_id);
+
+        if (!selectedPatch) {
+            console.warn('[DMX Reset] Device not found:', event.device_id);
+            return;
+        }
+
+        const channels = selectedPatch.device.channels;
+        const startAddress = selectedPatch.start_address;
+        const dmxChannels = {};
+
+        // Reset DMX channels to 0 based on event type
+        switch (event.type) {
+            case 'dimmer':
+                channels.forEach((channel, index) => {
+                    if (channel.type === 'dimmer_channel') {
+                        const dmxAddress = startAddress + index;
+                        dmxChannels[dmxAddress] = 0;
+                        console.log(`[DMX Reset] Dimmer: CH${dmxAddress} = 0`);
+                    }
+                });
+                break;
+
+            case 'color':
+                channels.forEach((channel, index) => {
+                    const dmxAddress = startAddress + index;
+                    if (channel.type === 'red_channel' ||
+                        channel.type === 'green_channel' ||
+                        channel.type === 'blue_channel') {
+                        dmxChannels[dmxAddress] = 0;
+                        console.log(`[DMX Reset] Color: CH${dmxAddress} = 0`);
+                    }
+                });
+                break;
+
+            case 'position':
+                channels.forEach((channel, index) => {
+                    const dmxAddress = startAddress + index;
+                    if (channel.type === 'pan' || channel.type === 'tilt') {
+                        dmxChannels[dmxAddress] = 0;
+                        console.log(`[DMX Reset] Position: CH${dmxAddress} = 0`);
+                    }
+                });
+                break;
+        }
+
+        // Send reset command to backend
+        if (Object.keys(dmxChannels).length > 0) {
+            console.log('[DMX Reset] Sending reset to backend:', dmxChannels);
+            fetch('/api/set-dmx-channels', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ channels: dmxChannels })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('[DMX Reset] Backend response:', data);
+            })
+            .catch(error => {
+                console.error('[DMX Reset] Error:', error);
+            });
+        }
+    }
+
+    resetAllActiveEvents() {
+        console.log('[DMX Reset] Resetting all active events:', this.activeEvents.size);
+
+        // Reset all currently active events
+        if (this.currentSequence && this.currentSequence.events) {
+            this.currentSequence.events.forEach(event => {
+                if (this.activeEvents.has(event.id)) {
+                    this.resetEventDMX(event);
+                }
+            });
+        }
+
+        // Clear the active events set
+        this.activeEvents.clear();
     }
 }

@@ -150,16 +150,89 @@ def configure_hotspot():
 @network_api.route('/api/disable-hotspot', methods=['POST'])
 def disable_hotspot():
     try:
-        result = subprocess.run(['sudo', 'nmcli', 'connection', 'down', 'Hotspot'], 
+        result = subprocess.run(['sudo', 'nmcli', 'connection', 'down', 'Hotspot'],
                               capture_output=True, text=True, timeout=10)
-        
+
         return jsonify({
             'success': True,
             'message': 'Hotspot disabled'
         })
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@network_api.route('/api/add-external-storage', methods=['POST'])
+def add_external_storage():
+    try:
+        data = request.get_json()
+        path = data.get('path')
+
+        if not path:
+            return jsonify({'success': False, 'error': 'Path is required'}), 400
+
+        # Check if the path is a valid block device
+        if not path.startswith('/dev/'):
+            return jsonify({'success': False, 'error': 'Invalid device path'}), 400
+
+        # Check if device exists
+        if not os.path.exists(path):
+            return jsonify({'success': False, 'error': 'Device not found'}), 404
+
+        # Create a mount point if needed
+        mount_base = '/mnt'
+        device_name = os.path.basename(path)
+        mount_point = os.path.join(mount_base, device_name)
+
+        # Create mount directory
+        os.makedirs(mount_point, exist_ok=True)
+
+        # Try to mount the device
+        result = subprocess.run(['sudo', 'mount', path, mount_point],
+                              capture_output=True, text=True, timeout=10)
+
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'message': f'Device mounted at {mount_point}',
+                'mount_point': mount_point
+            })
+        else:
+            error_msg = result.stderr.strip() if result.stderr.strip() else result.stdout.strip()
+            return jsonify({
+                'success': False,
+                'error': f'Failed to mount device: {error_msg}'
+            })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@network_api.route('/api/remove-external-storage', methods=['POST'])
+def remove_external_storage():
+    try:
+        data = request.get_json()
+        path = data.get('path')
+
+        if not path:
+            return jsonify({'success': False, 'error': 'Path is required'}), 400
+
+        # Unmount the device
+        result = subprocess.run(['sudo', 'umount', path],
+                              capture_output=True, text=True, timeout=10)
+
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'message': 'External storage removed'
+            })
+        else:
+            error_msg = result.stderr.strip() if result.stderr.strip() else result.stdout.strip()
+            return jsonify({
+                'success': False,
+                'error': f'Failed to unmount device: {error_msg}'
+            })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Network management helper functions
 def get_network_status():
@@ -411,49 +484,129 @@ def get_current_ssid():
     return None
 
 def scan_external_storage():
-    """Scan for mounted external storage devices"""
+    """Scan for all external storage devices (mounted and unmounted)"""
     external_devices = []
-    
+    mounted_devices = {}
+
     try:
-        # Read /proc/mounts to find mounted USB devices
+        # First, get info about mounted devices
         with open('/proc/mounts', 'r') as f:
             mounts = f.read()
-        
-        # Look for typical USB mount points
+
         usb_patterns = ['/media/', '/mnt/', '/run/media/']
-        
+
         for line in mounts.split('\n'):
             if not line.strip():
                 continue
-                
+
             parts = line.split()
             if len(parts) >= 3:
                 device, mount_point, fs_type = parts[:3]
-                
-                # Skip system mounts
+
                 if any(mount_point.startswith(pattern) for pattern in usb_patterns):
                     try:
-                        # Get storage info
                         statvfs = os.statvfs(mount_point)
                         total = statvfs.f_frsize * statvfs.f_blocks
                         used = total - (statvfs.f_frsize * statvfs.f_bavail)
-                        
-                        # Get device name
-                        device_name = os.path.basename(mount_point)
-                        
-                        external_devices.append({
+
+                        mounted_devices[device] = {
                             'device': device,
-                            'mount_point': mount_point,
-                            'name': device_name,
+                            'path': mount_point,
+                            'name': os.path.basename(mount_point),
                             'filesystem': fs_type,
                             'total': total,
                             'used': used,
-                            'free': total - used
-                        })
+                            'free': total - used,
+                            'mounted': True
+                        }
                     except OSError:
                         continue
-                        
     except Exception:
         pass
-    
+
+    try:
+        # Now scan all block devices using lsblk
+        result = subprocess.run(['lsblk', '-J', '-o', 'NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL'],
+                              capture_output=True, text=True, timeout=10)
+
+        if result.returncode == 0:
+            import json
+            devices_data = json.loads(result.stdout)
+
+            for device in devices_data.get('blockdevices', []):
+                # Look for USB devices and their partitions
+                if device.get('type') in ['disk', 'part']:
+                    device_path = f"/dev/{device['name']}"
+
+                    # Check if it's already in mounted_devices
+                    if device_path in mounted_devices:
+                        external_devices.append(mounted_devices[device_path])
+                    else:
+                        # Unmounted device - add it anyway
+                        size_str = device.get('size', '0B')
+                        # Parse size (e.g., "1.8T", "500G", "16M")
+                        total = parse_size_string(size_str)
+
+                        external_devices.append({
+                            'device': device_path,
+                            'path': device.get('mountpoint') or device_path,
+                            'name': device.get('model') or device['name'],
+                            'filesystem': device.get('fstype', 'unknown'),
+                            'total': total,
+                            'used': 0,
+                            'free': total,
+                            'mounted': bool(device.get('mountpoint'))
+                        })
+
+                    # Check for child partitions
+                    for child in device.get('children', []):
+                        child_path = f"/dev/{child['name']}"
+
+                        if child_path in mounted_devices:
+                            external_devices.append(mounted_devices[child_path])
+                        else:
+                            size_str = child.get('size', '0B')
+                            total = parse_size_string(size_str)
+
+                            external_devices.append({
+                                'device': child_path,
+                                'path': child.get('mountpoint') or child_path,
+                                'name': f"{device.get('model', device['name'])} - {child['name']}",
+                                'filesystem': child.get('fstype', 'unknown'),
+                                'total': total,
+                                'used': 0,
+                                'free': total,
+                                'mounted': bool(child.get('mountpoint'))
+                            })
+    except Exception as e:
+        # Fallback to mounted devices only if lsblk fails
+        external_devices = list(mounted_devices.values())
+
     return external_devices
+
+def parse_size_string(size_str):
+    """Parse size strings like '1.8T', '500G', '16M' to bytes"""
+    if not size_str or size_str == '0B':
+        return 0
+
+    units = {
+        'B': 1,
+        'K': 1024,
+        'M': 1024**2,
+        'G': 1024**3,
+        'T': 1024**4,
+        'P': 1024**5
+    }
+
+    try:
+        # Extract number and unit
+        import re
+        match = re.match(r'([\d.]+)([BKMGTP])?', size_str.upper())
+        if match:
+            number = float(match.group(1))
+            unit = match.group(2) or 'B'
+            return int(number * units.get(unit, 1))
+    except:
+        pass
+
+    return 0

@@ -90,26 +90,21 @@
             </div>
             <div class="modal-body">
                 <form id="eventForm">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Start Time (seconds)</label>
-                            <input type="number" class="form-control" id="eventTime" min="0" step="0.1" required placeholder="Enter start time" title="Start time in seconds">
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">End Time (seconds)</label>
-                            <input type="number" class="form-control" id="eventEndTime" min="0" step="0.1" required placeholder="Enter end time" title="End time in seconds">
-                        </div>
+                    <!-- Time Display (Read-only info) -->
+                    <div id="eventTimeInfo">
+                        <!-- Time info will be displayed here -->
                     </div>
-                    
+
                     <div class="mb-3">
-                        <label class="form-label">Devices</label>
-                        <div id="deviceList">
-                            <!-- Patched devices will be loaded here -->
+                        <label class="form-label fw-bold">Select Device</label>
+                        <div id="deviceList" class="device-selection">
+                            <!-- Patched devices will be loaded here as radio buttons -->
                         </div>
                     </div>
-                    
-                    <div id="eventFields">
-                        <!-- Dynamic fields based on device capabilities -->
+
+                    <div id="eventTypeOptions">
+                        <!-- Dynamic checkbox options based on device capabilities -->
+                        <p class="text-muted">Please select a device first</p>
                     </div>
                 </form>
             </div>

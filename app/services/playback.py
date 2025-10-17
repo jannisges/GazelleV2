@@ -241,12 +241,16 @@ def sequence_playback_loop(sequence, start_time_offset=0):
         # Check for events that need to be cleared
         events_to_remove = []
         for active_event in active_events:
-            end_time = active_event.get('end_time')
-            if end_time is not None and current_time >= end_time:
-                print(f"[PLAYBACK] Clearing event at end_time: {active_event}")
+            # Calculate end_time from start time + duration
+            event_start_time = active_event.get('time', 0)
+            event_duration = active_event.get('duration', 2.0)  # Default 2 seconds
+            event_end_time = event_start_time + event_duration
+
+            if current_time >= event_end_time:
+                print(f"[PLAYBACK] Event ended at {event_end_time:.2f}s (duration: {event_duration}s) - clearing DMX")
                 clear_dmx_event(active_event)
                 events_to_remove.append(active_event)
-            
+
         # Remove cleared events from active list
         for event in events_to_remove:
             active_events.remove(event)

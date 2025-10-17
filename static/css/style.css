@@ -927,6 +927,65 @@ body {
     color: #ffffff;
 }
 
+/* Dark mode for new timeline device tracks */
+[data-bs-theme="dark"] .sequence-track.device-track {
+    background-color: #2a2a2a !important;
+    border-bottom-color: #444 !important;
+}
+
+[data-bs-theme="dark"] .sequence-track.sub-track {
+    background-color: #1f1f1f !important;
+    border-bottom-color: #333 !important;
+}
+
+[data-bs-theme="dark"] .track-header {
+    color: #e0e0e0 !important;
+    background-color: rgba(42, 42, 42, 0.95) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-bs-theme="dark"] .sub-track-label {
+    color: #999 !important;
+}
+
+[data-bs-theme="dark"] .expand-toggle {
+    color: #4da3ff !important;
+}
+
+[data-bs-theme="dark"] .expand-toggle:hover {
+    color: #7bb8ff !important;
+}
+
+/* Dark mode for event selection */
+[data-bs-theme="dark"] .sequence-event.selected {
+    box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.9) !important;
+    outline: 2px solid #ffc107 !important;
+    outline-offset: 1px;
+}
+
+/* Dark mode for event modal */
+[data-bs-theme="dark"] .device-selection {
+    background-color: #2a2a2a !important;
+}
+
+[data-bs-theme="dark"] .device-selection .form-check {
+    background-color: #1a1a1a !important;
+}
+
+[data-bs-theme="dark"] .device-selection .form-check:hover {
+    background-color: #333 !important;
+}
+
+[data-bs-theme="dark"] #eventTypeOptions {
+    background-color: #2a2a2a !important;
+}
+
+[data-bs-theme="dark"] .dimmer-settings,
+[data-bs-theme="dark"] .color-settings,
+[data-bs-theme="dark"] .position-settings {
+    border-color: #444 !important;
+}
+
 /* Dark mode for device preview */
 [data-bs-theme="dark"] .device-preview {
     background-color: #1e1e1e;
@@ -1251,7 +1310,8 @@ body {
     border: 1px solid #ccc;
     margin: 10px 0;
     position: relative;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
     background: #f8f9fa;
 }
 
@@ -1272,6 +1332,60 @@ body {
     font-size: 12px;
     padding: 2px 5px;
     top: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sequence-event .event-label {
+    flex: 1;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.sequence-event .event-resize-handle {
+    position: absolute;
+    top: 0;
+    width: 8px;
+    height: 100%;
+    cursor: ew-resize;
+    z-index: 10;
+    transition: background-color 0.2s;
+}
+
+.sequence-event .event-resize-left {
+    left: 0;
+    border-radius: 3px 0 0 3px;
+}
+
+.sequence-event .event-resize-right {
+    right: 0;
+    border-radius: 0 3px 3px 0;
+}
+
+.sequence-event:hover .event-resize-handle {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.sequence-event .event-resize-handle:hover {
+    background-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.sequence-event .event-actions {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none;
+    z-index: 20;
+}
+
+.sequence-event.selected .event-actions {
+    display: flex;
+    gap: 5px;
 }
 
 .timeline-markers {
@@ -1339,4 +1453,149 @@ body {
 .available-sequences {
     max-height: 300px;
     overflow-y: auto;
+}
+
+/* New Timeline Styles - Device-based rows */
+.sequence-track.device-track {
+    background: #f0f0f0;
+    border-bottom: 2px solid #ccc;
+    position: absolute;
+    width: 100%;
+}
+
+.sequence-track.sub-track {
+    background: #f8f9fa;
+    border-bottom: 1px solid #e0e0e0;
+    position: absolute;
+    width: 100%;
+}
+
+.track-header {
+    position: absolute;
+    left: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 13px;
+    font-weight: 600;
+    color: #333;
+    display: flex;
+    align-items: center;
+    z-index: 100;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    pointer-events: auto;
+    cursor: default;
+}
+
+.expand-toggle {
+    font-size: 14px;
+    font-weight: bold;
+    user-select: none;
+    display: inline-block;
+    width: 18px;
+    text-align: center;
+    cursor: pointer;
+    color: #007bff;
+    transition: color 0.2s, transform 0.2s;
+}
+
+.expand-toggle:hover {
+    color: #0056b3;
+    transform: scale(1.2);
+}
+
+.sub-track-label {
+    position: absolute;
+    left: 30px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    color: #666;
+    font-weight: 500;
+}
+
+/* Selected events styling */
+.sequence-event.selected {
+    box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.8) !important;
+    z-index: 100 !important;
+    outline: 2px solid #ffc107 !important;
+    outline-offset: 1px;
+}
+
+.sequence-event.selected .event-actions {
+    display: flex !important;
+    gap: 3px;
+}
+
+/* Device selection in modal */
+.device-selection {
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 5px;
+}
+
+.device-selection .form-check {
+    padding: 8px;
+    margin-bottom: 5px;
+    background: white;
+    border-radius: 3px;
+    transition: background 0.2s;
+}
+
+.device-selection .form-check:hover {
+    background: #e9ecef;
+}
+
+/* Event type options with checkboxes */
+#eventTypeOptions {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 5px;
+    min-height: 100px;
+}
+
+#eventTypeOptions .form-check {
+    margin-bottom: 10px;
+}
+
+#eventTypeOptions .form-check-label {
+    font-size: 14px;
+}
+
+/* Settings sections that can be disabled */
+.dimmer-settings,
+.color-settings,
+.position-settings {
+    transition: opacity 0.3s;
+}
+
+/* Improved resize handles */
+.sequence-event .event-resize-handle {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.sequence-event:hover .event-resize-handle {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.sequence-event .event-resize-handle:hover {
+    background: rgba(255, 255, 255, 0.5) !important;
+    width: 10px;
+}
+
+/* Event action buttons */
+.sequence-event .event-actions .btn {
+    padding: 2px 6px;
+    font-size: 10px;
+    line-height: 1;
+    opacity: 0.9;
+}
+
+.sequence-event .event-actions .btn:hover {
+    opacity: 1;
 }

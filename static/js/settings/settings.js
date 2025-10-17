@@ -63,32 +63,60 @@ function loadStorageInfo() {
             // Update external storage
             const externalList = document.getElementById('externalStorageList');
             externalList.innerHTML = '';
-            
+
             if (data.external && data.external.length > 0) {
                 data.external.forEach(storage => {
                     const storageDiv = document.createElement('div');
                     storageDiv.className = 'storage-info';
-                    storageDiv.innerHTML = `
-                        <div class="storage-icon">
-                            <i class="bi bi-usb-drive"></i>
-                        </div>
-                        <div class="storage-details">
-                            <h6>${storage.name}</h6>
+
+                    // Different display for mounted vs unmounted devices
+                    let detailsHtml = '';
+                    let actionButton = '';
+
+                    if (storage.mounted) {
+                        const usedPercent = storage.total > 0 ? (storage.used / storage.total) * 100 : 0;
+                        detailsHtml = `
+                            <h6>${storage.name} <span class="badge bg-success">Mounted</span></h6>
+                            <small class="text-muted">${storage.device} • ${storage.filesystem}</small>
                             <div class="progress-bar-container">
                                 <div class="progress">
-                                    <div class="progress-bar" style="width: ${(storage.used / storage.total) * 100}%"></div>
+                                    <div class="progress-bar" style="width: ${usedPercent}%"></div>
                                 </div>
                             </div>
                             <small>${DMXUtils.formatFileSize(storage.used)} / ${DMXUtils.formatFileSize(storage.total)}</small>
+                        `;
+                        actionButton = `
+                            <button class="btn btn-sm btn-outline-danger" onclick="removeExternalStorage('${storage.path}')" title="Unmount">
+                                <i class="bi bi-eject"></i>
+                            </button>
+                        `;
+                    } else {
+                        const fsType = storage.filesystem && storage.filesystem !== 'unknown' ? storage.filesystem : 'No filesystem';
+                        detailsHtml = `
+                            <h6>${storage.name} <span class="badge bg-warning">Not Mounted</span></h6>
+                            <small class="text-muted">${storage.device} • ${fsType}</small>
+                            <small class="d-block">${DMXUtils.formatFileSize(storage.total)}</small>
+                        `;
+                        actionButton = `
+                            <button class="btn btn-sm btn-outline-primary" onclick="mountExternalStorage('${storage.device}')" title="Mount">
+                                <i class="bi bi-plus-circle"></i> Mount
+                            </button>
+                        `;
+                    }
+
+                    storageDiv.innerHTML = `
+                        <div class="storage-icon">
+                            <i class="bi bi-${storage.mounted ? 'usb-drive-fill' : 'usb-drive'}"></i>
                         </div>
-                        <button class="btn btn-sm btn-outline-danger" onclick="removeExternalStorage('${storage.path}')">
-                            <i class="bi bi-x"></i>
-                        </button>
+                        <div class="storage-details">
+                            ${detailsHtml}
+                        </div>
+                        ${actionButton}
                     `;
                     externalList.appendChild(storageDiv);
                 });
             } else {
-                externalList.innerHTML = '<p class="text-muted">No external storage devices connected</p>';
+                externalList.innerHTML = '<p class="text-muted">No external storage devices found</p>';
             }
         }
     })
@@ -368,21 +396,25 @@ function scanExternalStorage() {
 }
 
 function addExternalStorage() {
-    const path = prompt('Enter the path to the external storage device:');
+    const path = prompt('Enter the path to the external storage device (e.g., /dev/sdb1):');
     if (!path) return;
-    
-    DMXUtils.apiCall('/api/add-external-storage', 'POST', { path: path })
+
+    mountExternalStorage(path);
+}
+
+function mountExternalStorage(devicePath) {
+    DMXUtils.apiCall('/api/add-external-storage', 'POST', { path: devicePath })
     .then(response => {
         if (response.success) {
-            DMXUtils.showNotification('External storage added', 'success');
+            DMXUtils.showNotification('External storage mounted successfully', 'success');
             loadStorageInfo();
         } else {
-            DMXUtils.showNotification('Error adding external storage: ' + response.error, 'error');
+            DMXUtils.showNotification('Error mounting external storage: ' + response.error, 'error');
         }
     })
     .catch(error => {
-        console.error('Error adding external storage:', error);
-        DMXUtils.showNotification('Error adding external storage', 'error');
+        console.error('Error mounting external storage:', error);
+        DMXUtils.showNotification('Error mounting external storage', 'error');
     });
 }
 

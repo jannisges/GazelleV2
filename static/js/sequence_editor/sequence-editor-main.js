@@ -73,11 +73,14 @@ class SequenceEditorApp {
             this.playbackController.setCurrentSequence(sequence);
         };
         
-        // When devices are loaded, update event modal
+        // When devices are loaded, update event modal and sequence editor
         const originalSetPatchedDevices = this.uiManager.setPatchedDevices.bind(this.uiManager);
         this.uiManager.setPatchedDevices = (devices) => {
             originalSetPatchedDevices(devices);
             this.eventModal.setPatchedDevices(devices);
+            if (this.sequenceEditor) {
+                this.sequenceEditor.setPatchedDevices(devices);
+            }
         };
     }
 }

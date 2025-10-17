@@ -1,283 +1,270 @@
 // Waveform display and interaction module
+// Improved architecture with better performance and maintainability
 
 class WaveformRenderer {
+    // Constants
+    static CONSTANTS = {
+        MIN_ZOOM: 1,
+        MAX_ZOOM: 100,
+        THROTTLE_DELAY: 16, // 60 FPS
+        PLAYHEAD_UPDATE_FPS: 30,
+        HIGH_RES_SAMPLE_THRESHOLD: 100,
+        HIGH_RES_STEP_DIVISOR: 50,
+        MAX_AMPLITUDE_SCALE: 0.45,
+        ZOOM_FACTOR: 1.25
+    };
+
     constructor(canvasId, markersId) {
         this.canvas = document.getElementById(canvasId);
-        this.ctx = this.canvas.getContext('2d');
         this.markersContainer = document.getElementById(markersId);
-        this.waveformData = [];
-        this.duration = 0;
-        this.zoomLevel = 1;
-        this.scrollPosition = 0;
-        this.isPlaying = false;
-        this.currentTime = 0;
+
+        if (!this.canvas) {
+            throw new Error(`Canvas element ${canvasId} not found`);
+        }
+
+        this.ctx = this.canvas.getContext('2d');
+
+        // State
+        this.state = {
+            waveformData: null,
+            duration: 0,
+            zoomLevel: 1,
+            scrollPosition: 0,
+            currentTime: 0,
+            isPlaying: false
+        };
+
+        // Cache
+        this.cache = {
+            offscreenCanvas: null,
+            offscreenCtx: null,
+            waveformCache: new Map(),
+            globalMaxAmplitude: null,
+            globalMaxLow: null,
+            globalMaxMid: null,
+            globalMaxHigh: null,
+            lastRenderParams: null
+        };
+
+        // Flags
+        this.flags = {
+            isDirty: true,
+            isDestroyed: false
+        };
+
+        // Animation
         this.animationId = null;
-        
-        // Offscreen canvas for static waveform rendering
-        this.offscreenCanvas = null;
-        this.offscreenCtx = null;
-        this.waveformCache = new Map();
-        this.isDirty = true;
-        
-        // Performance tracking
-        this.lastRenderParams = null;
-        
+
+        // Initialize
+        this.init();
+    }
+
+    init() {
         this.setupCanvas();
         this.setupPlayheadOverlay();
         this.setupEventListeners();
-        
-        // Show placeholder initially
         this.render();
     }
-    
+
     setupCanvas() {
-        // Set canvas size
         const container = this.canvas.parentElement;
         const containerRect = container.getBoundingClientRect();
-        
-        // Set up canvas dimensions
+
+        // Set canvas dimensions
         this.canvas.width = containerRect.width || 800;
         this.canvas.height = containerRect.height || 200;
-        this.canvas.style.width = this.canvas.width + 'px';
-        this.canvas.style.height = this.canvas.height + 'px';
-        
-        // Initialize offscreen canvas
+        this.canvas.style.width = `${this.canvas.width}px`;
+        this.canvas.style.height = `${this.canvas.height}px`;
+
+        // Initialize offscreen canvas for caching
         this.setupOffscreenCanvas();
-        
-        // Store resize handler
-        this.canvas.resizeHandler = () => {
+
+        // Resize handler
+        this.resizeHandler = this.throttle(() => {
             const newRect = container.getBoundingClientRect();
             this.canvas.width = newRect.width || 800;
             this.canvas.height = newRect.height || 200;
-            this.canvas.style.width = this.canvas.width + 'px';
-            this.canvas.style.height = this.canvas.height + 'px';
+            this.canvas.style.width = `${this.canvas.width}px`;
+            this.canvas.style.height = `${this.canvas.height}px`;
             this.setupOffscreenCanvas();
             this.syncOverlaySize();
             this.invalidateCache();
             this.render();
-        };
-        
-        // Add resize listener
-        window.addEventListener('resize', this.canvas.resizeHandler);
+        }, 100);
+
+        window.addEventListener('resize', this.resizeHandler);
     }
-    
+
+    setupOffscreenCanvas() {
+        if (!this.cache.offscreenCanvas) {
+            this.cache.offscreenCanvas = document.createElement('canvas');
+        }
+        this.cache.offscreenCanvas.width = this.canvas.width;
+        this.cache.offscreenCanvas.height = this.canvas.height;
+        this.cache.offscreenCtx = this.cache.offscreenCanvas.getContext('2d');
+
+        this.cache.waveformCache.clear();
+        this.flags.isDirty = true;
+    }
+
     setupPlayheadOverlay() {
         // Create overlay canvas for playhead
         this.playheadOverlay = document.createElement('canvas');
-        this.playheadOverlay.style.position = 'absolute';
-        this.playheadOverlay.style.top = '0';
-        this.playheadOverlay.style.left = '0';
-        this.playheadOverlay.style.pointerEvents = 'none';
-        this.playheadOverlay.style.zIndex = '10';
-        
-        // Insert overlay after main canvas
+        Object.assign(this.playheadOverlay.style, {
+            position: 'absolute',
+            top: '0',
+            left: '0',
+            pointerEvents: 'none',
+            zIndex: '10'
+        });
+
         this.canvas.parentElement.appendChild(this.playheadOverlay);
         this.playheadCtx = this.playheadOverlay.getContext('2d');
-        
-        // Sync overlay size with main canvas
+
         this.syncOverlaySize();
-        
-        // Store resize handler for overlay
-        this.playheadOverlay.resizeHandler = () => {
+
+        // Resize handler for overlay
+        this.overlayResizeHandler = this.throttle(() => {
             this.syncOverlaySize();
-        };
-        
-        // Add resize listener for overlay
-        window.addEventListener('resize', this.playheadOverlay.resizeHandler);
+        }, 100);
+
+        window.addEventListener('resize', this.overlayResizeHandler);
     }
-    
+
     syncOverlaySize() {
         this.playheadOverlay.width = this.canvas.width;
         this.playheadOverlay.height = this.canvas.height;
         this.playheadOverlay.style.width = this.canvas.style.width;
         this.playheadOverlay.style.height = this.canvas.style.height;
     }
-    
+
     setupEventListeners() {
-        // Track dragging state to prevent click after drag
+        // Click to seek
+        this.boundClick = this.handleClick.bind(this);
+        this.canvas.addEventListener('click', this.boundClick);
+
+        // Right-click to add event
+        this.boundContextMenu = this.handleContextMenu.bind(this);
+        this.canvas.addEventListener('contextmenu', this.boundContextMenu);
+
+        // Wheel for zoom
+        this.boundWheel = this.throttle(this.handleWheel.bind(this),
+            WaveformRenderer.CONSTANTS.THROTTLE_DELAY);
+        this.canvas.addEventListener('wheel', this.boundWheel, { passive: false });
+
+        // Drag to scroll
+        this.setupDragScroll();
+    }
+
+    setupDragScroll() {
         let isDragging = false;
         let lastX = 0;
-        let hasDragged = false;
-        
-        // Click to seek (only if not dragging)
-        this.canvas.addEventListener('click', (e) => {
-            if (hasDragged) {
-                hasDragged = false; // Reset flag
-                return; // Don't seek if we just finished dragging
-            }
-            
-            const rect = this.canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const time = this.pixelToTime(x);
-            this.seekTo(time);
-        });
-        
-        // Right-click to add event
-        this.canvas.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            const rect = this.canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const time = this.pixelToTime(x);
-            this.showAddEventDialog(time);
-        });
-        
-        // Mouse wheel for zoom with throttling
-        let zoomTimeout = null;
-        this.canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            
-            // Clear previous timeout
-            if (zoomTimeout) {
-                clearTimeout(zoomTimeout);
-            }
-            
-            // Throttle zoom operations to 16ms (60 FPS)
-            zoomTimeout = setTimeout(() => {
-                const rect = this.canvas.getBoundingClientRect();
-                const mouseX = (e.clientX - rect.left) / rect.width;
-                
-                const zoomFactor = e.deltaY > 0 ? 0.8 : 1.25;
-                const newZoomLevel = Math.max(1, Math.min(100, this.zoomLevel * zoomFactor));
-                
-                // Adjust scroll position to zoom toward mouse position
-                if (newZoomLevel !== this.zoomLevel) {
-                    // Calculate the time at mouse position before zoom
-                    const mouseTime = this.pixelToTime((e.clientX - rect.left));
-                    
-                    // Update zoom level first
-                    this.zoomLevel = newZoomLevel;
-                    
-                    // Calculate new scroll position to keep mouse time at same pixel
-                    const visibleDuration = this.duration / this.zoomLevel;
-                    const targetTime = mouseTime - (mouseX * visibleDuration);
-                    const maxScroll = Math.max(0, this.duration - visibleDuration);
-                    const newScrollPosition = maxScroll > 0 ? Math.max(0, Math.min(1, targetTime / maxScroll)) : 0;
-                    
-                    this.scrollPosition = newScrollPosition;
-                    this.invalidateCache();
-                    this.render();
-                    this.updateMarkers();
-                    
-                    // Dispatch zoom change event for synchronization
-                    const event = new CustomEvent('waveform-zoom-change', { 
-                        detail: { zoomLevel: this.zoomLevel, scrollPosition: this.scrollPosition } 
-                    });
-                    this.canvas.dispatchEvent(event);
-                }
-            }, 16);
-        });
-        
-        // Drag to scroll when zoomed
-        this.canvas.addEventListener('mousedown', (e) => {
-            if (this.zoomLevel > 1) {
+
+        const handleMouseDown = (e) => {
+            if (this.state.zoomLevel > 1) {
                 isDragging = true;
-                hasDragged = false; // Reset drag flag
                 lastX = e.clientX;
                 this.canvas.style.cursor = 'grabbing';
+                e.preventDefault();
             }
-        });
-        
-        // Throttle mouse move events for dragging
-        let mouseMoveTimeout = null;
-        this.canvas.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                // Clear previous timeout
-                if (mouseMoveTimeout) {
-                    clearTimeout(mouseMoveTimeout);
-                }
-                
-                // Throttle to 16ms (60 FPS)
-                mouseMoveTimeout = setTimeout(() => {
-                    const deltaX = e.clientX - lastX;
-                    const scrollDelta = -(deltaX / this.canvas.width) * (1 / this.zoomLevel);
-                    const maxScrollPosition = this.zoomLevel > 1 ? 1 : 0;
-                    const newScrollPosition = Math.max(0, Math.min(maxScrollPosition, 
-                        this.scrollPosition + scrollDelta));
-                    
-                    if (newScrollPosition !== this.scrollPosition) {
-                        this.scrollPosition = newScrollPosition;
-                        lastX = e.clientX;
-                        hasDragged = true; // Mark that we've dragged
-                        this.invalidateCache();
-                        this.render();
-                        this.updateMarkers();
-                        
-                        // Dispatch scroll change event for synchronization
-                        const event = new CustomEvent('waveform-scroll-change', { 
-                            detail: { zoomLevel: this.zoomLevel, scrollPosition: this.scrollPosition } 
-                        });
-                        this.canvas.dispatchEvent(event);
-                    }
-                }, 16);
-            }
-        });
-        
-        this.canvas.addEventListener('mouseup', () => {
-            isDragging = false;
-            this.canvas.style.cursor = 'default';
-        });
-        
-        this.canvas.addEventListener('mouseleave', () => {
-            isDragging = false;
-            this.canvas.style.cursor = 'default';
-        });
-    }
-    
-    setupOffscreenCanvas() {
-        // Create offscreen canvas for waveform caching
-        if (!this.offscreenCanvas) {
-            this.offscreenCanvas = document.createElement('canvas');
-        }
-        this.offscreenCanvas.width = this.canvas.width;
-        this.offscreenCanvas.height = this.canvas.height;
-        this.offscreenCtx = this.offscreenCanvas.getContext('2d');
-        
-        // Clear cache when canvas size changes
-        this.waveformCache.clear();
-        this.isDirty = true;
-    }
-    
-    invalidateCache() {
-        this.isDirty = true;
-        this.waveformCache.clear();
-    }
-    
-    generateCacheKey() {
-        // Generate cache key based on rendering parameters
-        const key = `${this.zoomLevel}_${this.scrollPosition}_${this.canvas.width}_${this.canvas.height}`;
-        return key;
-    }
-    
-    isRenderParamsChanged() {
-        const currentParams = {
-            zoomLevel: this.zoomLevel,
-            scrollPosition: this.scrollPosition,
-            width: this.canvas.width,
-            height: this.canvas.height,
-            hasData: !!(this.waveformData && this.waveformData.amplitude)
         };
-        
-        if (!this.lastRenderParams) {
-            this.lastRenderParams = currentParams;
-            return true;
-        }
-        
-        const changed = Object.keys(currentParams).some(key => 
-            this.lastRenderParams[key] !== currentParams[key]
-        );
-        
-        if (changed) {
-            this.lastRenderParams = currentParams;
-        }
-        
-        return changed;
+
+        const handleMouseMove = this.throttle((e) => {
+            if (!isDragging) return;
+
+            const deltaX = e.clientX - lastX;
+            const scrollDelta = -(deltaX / this.canvas.width) / this.state.zoomLevel;
+            const maxScrollPosition = this.state.zoomLevel > 1 ? 1 : 0;
+            const newScrollPosition = this.clamp(
+                this.state.scrollPosition + scrollDelta,
+                0,
+                maxScrollPosition
+            );
+
+            if (newScrollPosition !== this.state.scrollPosition) {
+                this.state.scrollPosition = newScrollPosition;
+                lastX = e.clientX;
+                this.invalidateCache();
+                this.render();
+                this.updateMarkers();
+                this.dispatchEvent('scroll-change', {
+                    zoomLevel: this.state.zoomLevel,
+                    scrollPosition: this.state.scrollPosition
+                });
+            }
+        }, WaveformRenderer.CONSTANTS.THROTTLE_DELAY);
+
+        const handleMouseUp = () => {
+            if (isDragging) {
+                isDragging = false;
+                this.canvas.style.cursor = 'default';
+            }
+        };
+
+        this.boundMouseDown = handleMouseDown;
+        this.boundMouseMove = handleMouseMove;
+        this.boundMouseUp = handleMouseUp;
+
+        this.canvas.addEventListener('mousedown', this.boundMouseDown);
+        document.addEventListener('mousemove', this.boundMouseMove);
+        document.addEventListener('mouseup', this.boundMouseUp);
+        this.canvas.addEventListener('mouseleave', handleMouseUp);
     }
-    
+
+    // Event Handlers
+    handleClick(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const time = this.pixelToTime(x);
+        this.seekTo(time);
+    }
+
+    handleContextMenu(e) {
+        e.preventDefault();
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const time = this.pixelToTime(x);
+        this.showAddEventDialog(time);
+    }
+
+    handleWheel(e) {
+        e.preventDefault();
+
+        const rect = this.canvas.getBoundingClientRect();
+        const mouseX = (e.clientX - rect.left) / rect.width;
+        const mouseTime = this.pixelToTime(e.clientX - rect.left);
+
+        const zoomFactor = e.deltaY > 0 ? 1 / WaveformRenderer.CONSTANTS.ZOOM_FACTOR : WaveformRenderer.CONSTANTS.ZOOM_FACTOR;
+        const newZoomLevel = this.clamp(
+            this.state.zoomLevel * zoomFactor,
+            WaveformRenderer.CONSTANTS.MIN_ZOOM,
+            WaveformRenderer.CONSTANTS.MAX_ZOOM
+        );
+
+        if (newZoomLevel !== this.state.zoomLevel) {
+            this.state.zoomLevel = newZoomLevel;
+
+            // Adjust scroll to keep mouse position stable
+            const visibleDuration = this.getVisibleDuration();
+            const targetTime = mouseTime - (mouseX * visibleDuration);
+            const maxScroll = Math.max(0, this.state.duration - visibleDuration);
+            this.state.scrollPosition = maxScroll > 0 ? this.clamp(targetTime / maxScroll, 0, 1) : 0;
+
+            this.invalidateCache();
+            this.render();
+            this.updateMarkers();
+            this.dispatchEvent('zoom-change', {
+                zoomLevel: this.state.zoomLevel,
+                scrollPosition: this.state.scrollPosition
+            });
+        }
+    }
+
+    // Public API
     loadWaveform(waveformData, duration) {
         console.log('Loading waveform data:', waveformData);
         console.log('Duration:', duration);
-        
-        // Verify data alignment and show resolution info
+
         if (waveformData) {
             const ampLength = waveformData.amplitude ? waveformData.amplitude.length : 0;
             console.log('High-resolution waveform data loaded:');
@@ -285,428 +272,339 @@ class WaveformRenderer {
             console.log('- Low freq samples:', waveformData.low ? waveformData.low.length.toLocaleString() : 'N/A');
             console.log('- Mid freq samples:', waveformData.mid ? waveformData.mid.length.toLocaleString() : 'N/A');
             console.log('- High freq samples:', waveformData.high ? waveformData.high.length.toLocaleString() : 'N/A');
+
             if (duration && ampLength) {
                 const samplesPerSecond = Math.round(ampLength / duration);
                 console.log('- Effective sample rate:', samplesPerSecond.toLocaleString(), 'samples/second');
             }
         }
-        
-        this.waveformData = waveformData;
-        this.duration = duration;
-        
-        // Reset global amplitude calculations for new data
-        this.globalMaxAmplitude = null;
-        this.globalMaxLow = null;
-        this.globalMaxMid = null;
-        this.globalMaxHigh = null;
-        
+
+        this.state.waveformData = waveformData;
+        this.state.duration = duration;
+
+        // Reset global amplitude calculations
+        this.cache.globalMaxAmplitude = null;
+        this.cache.globalMaxLow = null;
+        this.cache.globalMaxMid = null;
+        this.cache.globalMaxHigh = null;
+
         this.invalidateCache();
         this.render();
         this.updateMarkers();
     }
-    
+
     setZoomLevel(zoomLevel) {
-        const newZoom = Math.max(1, Math.min(100, zoomLevel));
-        if (newZoom !== this.zoomLevel) {
-            this.zoomLevel = newZoom;
+        const newZoom = this.clamp(
+            zoomLevel,
+            WaveformRenderer.CONSTANTS.MIN_ZOOM,
+            WaveformRenderer.CONSTANTS.MAX_ZOOM
+        );
+
+        if (newZoom !== this.state.zoomLevel) {
+            this.state.zoomLevel = newZoom;
             this.invalidateCache();
             this.render();
             this.updateMarkers();
-            
-            // Dispatch zoom change event for synchronization
-            const event = new CustomEvent('waveform-zoom-change', { 
-                detail: { zoomLevel: this.zoomLevel, scrollPosition: this.scrollPosition } 
+            this.dispatchEvent('zoom-change', {
+                zoomLevel: this.state.zoomLevel,
+                scrollPosition: this.state.scrollPosition
             });
-            this.canvas.dispatchEvent(event);
         }
     }
-    
+
     syncFromExternal(zoomLevel, scrollPosition) {
-        // Update zoom and scroll without triggering events (to avoid infinite loops)
-        const newZoom = Math.max(1, Math.min(100, zoomLevel));
+        const newZoom = this.clamp(
+            zoomLevel,
+            WaveformRenderer.CONSTANTS.MIN_ZOOM,
+            WaveformRenderer.CONSTANTS.MAX_ZOOM
+        );
         const maxScrollPosition = newZoom > 1 ? 1 : 0;
-        const newScrollPosition = Math.max(0, Math.min(maxScrollPosition, scrollPosition));
-        
-        // Only invalidate cache if parameters actually changed
-        if (newZoom !== this.zoomLevel || newScrollPosition !== this.scrollPosition) {
-            this.zoomLevel = newZoom;
-            this.scrollPosition = newScrollPosition;
+        const newScrollPosition = this.clamp(scrollPosition, 0, maxScrollPosition);
+
+        if (newZoom !== this.state.zoomLevel || newScrollPosition !== this.state.scrollPosition) {
+            this.state.zoomLevel = newZoom;
+            this.state.scrollPosition = newScrollPosition;
             this.invalidateCache();
             this.render();
             this.updateMarkers();
         }
     }
-    
+
     setCurrentTime(time) {
-        this.currentTime = time;
+        this.state.currentTime = time;
         this.updatePlayhead();
     }
-    
+
     setPlaying(isPlaying) {
-        this.isPlaying = isPlaying;
+        this.state.isPlaying = isPlaying;
         if (isPlaying) {
             this.startPlaybackAnimation();
         } else {
             this.stopPlaybackAnimation();
         }
     }
-    
-    startPlaybackAnimation() {
-        // Stop any existing animation before starting new one
-        this.stopPlaybackAnimation();
-        
-        // Throttle playhead animation to reduce CPU usage
-        let lastRender = 0;
-        const animate = () => {
-            if (this.isPlaying) {
-                const now = performance.now();
-                // Only render playhead at ~30fps to reduce CPU load
-                if (now - lastRender >= 33) {
-                    this.updatePlayhead();
-                    lastRender = now;
-                }
-                this.animationId = requestAnimationFrame(animate);
-            } else {
-                this.animationId = null;
-            }
-        };
-        this.animationId = requestAnimationFrame(animate);
+
+    // Rendering
+    invalidateCache() {
+        this.flags.isDirty = true;
+        this.cache.waveformCache.clear();
     }
-    
-    stopPlaybackAnimation() {
-        if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
-            this.animationId = null;
-        }
-    }
-    
+
     render() {
+        if (this.flags.isDestroyed) return;
+
         const ctx = this.ctx;
         const width = this.canvas.width;
         const height = this.canvas.height;
-        
+
         // Clear canvas
         ctx.clearRect(0, 0, width, height);
-        
-        if (!this.waveformData || (Array.isArray(this.waveformData) && this.waveformData.length === 0) || 
-            (typeof this.waveformData === 'object' && (!this.waveformData.amplitude || this.waveformData.amplitude.length === 0))) {
+
+        if (!this.hasWaveformData()) {
             this.drawPlaceholder();
             return;
         }
-        
-        // Draw waveform directly (fallback to original method)
+
+        // Draw waveform
         this.drawWaveform();
-        
-        // Update playhead overlay (not cached since it changes frequently)
+
+        // Update playhead overlay
         this.updatePlayhead();
     }
-    
+
+    hasWaveformData() {
+        if (!this.state.waveformData) return false;
+
+        if (Array.isArray(this.state.waveformData)) {
+            return this.state.waveformData.length > 0;
+        }
+
+        if (typeof this.state.waveformData === 'object') {
+            return this.state.waveformData.amplitude && this.state.waveformData.amplitude.length > 0;
+        }
+
+        return false;
+    }
+
     drawPlaceholder() {
-        this.drawPlaceholderToContext(this.ctx, this.canvas.width, this.canvas.height);
-    }
-    
-    drawPlaceholderToContext(ctx, width, height) {
-        // Check if dark mode is enabled
         const isDarkMode = document.documentElement.getAttribute('data-bs-theme') === 'dark';
-        
-        // Background color based on theme
-        ctx.fillStyle = isDarkMode ? '#1a1a1a' : '#f8f9fa';
-        ctx.fillRect(0, 0, width, height);
-        
-        // Text color based on theme
-        ctx.fillStyle = isDarkMode ? '#adb5bd' : '#6c757d';
-        ctx.font = '16px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('Load an audio file to see waveform', width / 2, height / 2);
+
+        this.ctx.fillStyle = isDarkMode ? '#1a1a1a' : '#f8f9fa';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        this.ctx.fillStyle = isDarkMode ? '#adb5bd' : '#6c757d';
+        this.ctx.font = '16px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('Load an audio file to see waveform', this.canvas.width / 2, this.canvas.height / 2);
     }
-    
-    renderWaveformToOffscreen() {
-        // Render waveform to offscreen canvas for caching
-        const ctx = this.offscreenCtx;
-        const width = this.offscreenCanvas.width;
-        const height = this.offscreenCanvas.height;
-        
-        // Clear offscreen canvas
-        ctx.clearRect(0, 0, width, height);
-        
-        this.drawWaveformToContext(ctx, width, height);
-    }
-    
+
     drawWaveform() {
         const ctx = this.ctx;
         const width = this.canvas.width;
         const height = this.canvas.height;
-        
+
         // Background
         ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(0, 0, width, height);
-        
-        // Get amplitude data for main waveform
-        let amplitudeData = [];
-        if (this.waveformData && this.waveformData.amplitude) {
-            amplitudeData = this.waveformData.amplitude;
-        } else if (Array.isArray(this.waveformData)) {
-            amplitudeData = this.waveformData;
-        }
-        
-        if (amplitudeData.length === 0) {
+
+        // Get amplitude data
+        const amplitudeData = this.getAmplitudeData();
+        if (!amplitudeData || amplitudeData.length === 0) {
             this.drawPlaceholder();
             return;
         }
-        
+
         // Calculate zoom and scroll parameters
-        const totalSamples = amplitudeData.length;
-        const visibleSamples = totalSamples / this.zoomLevel;
-        const startSample = Math.floor(this.scrollPosition * (totalSamples - visibleSamples));
-        const endSample = Math.min(totalSamples, startSample + visibleSamples);
-        
-        // Draw frequency bands if available, otherwise draw simple amplitude waveform
-        if (this.waveformData.low && this.waveformData.mid && this.waveformData.high) {
+        const { startSample, endSample } = this.getVisibleSampleRange(amplitudeData.length);
+
+        // Draw frequency bands or simple waveform
+        if (this.hasFrequencyData()) {
             this.drawFrequencyBands(startSample, endSample, width, height);
         } else {
-            // Fallback to simple green waveform if no frequency data
-            this.drawSimpleAmplitudeWaveform(amplitudeData, startSample, endSample, width, height);
+            this.drawSimpleWaveform(amplitudeData, startSample, endSample, width, height);
         }
-        
+
         // Draw center line
-        ctx.beginPath();
-        ctx.strokeStyle = '#444';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([2, 2]);
-        ctx.moveTo(0, height / 2);
-        ctx.lineTo(width, height / 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        this.drawCenterLine(width, height);
     }
-    
-    drawSimpleAmplitudeWaveform(amplitudeData, startSample, endSample, width, height) {
-        this.drawSimpleAmplitudeWaveformToContext(this.ctx, amplitudeData, startSample, endSample, width, height);
+
+    drawCenterLine(width, height) {
+        this.ctx.beginPath();
+        this.ctx.strokeStyle = '#444';
+        this.ctx.lineWidth = 1;
+        this.ctx.setLineDash([2, 2]);
+        this.ctx.moveTo(0, height / 2);
+        this.ctx.lineTo(width, height / 2);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
     }
-    
-    drawSimpleAmplitudeWaveformToContext(ctx, amplitudeData, startSample, endSample, width, height) {
+
+    drawSimpleWaveform(amplitudeData, startSample, endSample, width, height) {
         const centerY = height / 2;
-        const maxAmplitude = height * 0.45; // Leave some margin
-        
-        // Use fixed amplitude scaling based on entire dataset (calculated once)
-        if (!this.globalMaxAmplitude) {
-            this.globalMaxAmplitude = amplitudeData.reduce((max, val) => Math.max(max, Math.abs(val)), 0);
+        const maxAmplitude = height * WaveformRenderer.CONSTANTS.MAX_AMPLITUDE_SCALE;
+
+        // Calculate global max amplitude once
+        if (!this.cache.globalMaxAmplitude) {
+            this.cache.globalMaxAmplitude = amplitudeData.reduce(
+                (max, val) => Math.max(max, Math.abs(val)),
+                0
+            );
         }
-        const scale = this.globalMaxAmplitude > 0 ? maxAmplitude / this.globalMaxAmplitude : 1;
-        
-        // Calculate samples per pixel
-        const visibleSamples = endSample - startSample;
-        const samplesPerPixel = visibleSamples / width;
-        
-        // Draw green waveform for simple mode
-        ctx.strokeStyle = '#00ff88';
-        ctx.lineWidth = 1.5;
-        ctx.fillStyle = 'rgba(0, 255, 136, 0.3)';
-        
-        ctx.beginPath();
-        ctx.moveTo(0, centerY);
-        
-        // Draw upper part of waveform
+
+        const scale = this.cache.globalMaxAmplitude > 0 ? maxAmplitude / this.cache.globalMaxAmplitude : 1;
+        const samplesPerPixel = (endSample - startSample) / width;
+
+        // Draw waveform
+        this.ctx.strokeStyle = '#00ff88';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.fillStyle = 'rgba(0, 255, 136, 0.3)';
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, centerY);
+
+        // Draw upper part
         for (let x = 0; x < width; x++) {
-            const sampleStart = Math.floor(startSample + x * samplesPerPixel);
-            const sampleEnd = Math.floor(startSample + (x + 1) * samplesPerPixel);
-            
-            // Get peak value for this pixel to avoid aliasing
-            let peak = 0;
-            const endIndex = Math.min(sampleEnd, amplitudeData.length);
-            
-            // Optimize for high-resolution data - use step size when dealing with many samples per pixel
-            const sampleCount = endIndex - sampleStart;
-            if (sampleCount > 100) {
-                // For very high resolution, sample every few points to maintain performance
-                const step = Math.max(1, Math.floor(sampleCount / 50));
-                for (let i = sampleStart; i < endIndex; i += step) {
-                    peak = Math.max(peak, Math.abs(amplitudeData[i]));
-                }
-            } else {
-                // For normal resolution, check every sample
-                for (let i = sampleStart; i < endIndex; i++) {
-                    peak = Math.max(peak, Math.abs(amplitudeData[i]));
-                }
-            }
-            
+            const peak = this.getPeakForPixel(amplitudeData, startSample, x, samplesPerPixel);
             const y = centerY - (peak * scale);
-            if (x === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
-            }
+            this.ctx.lineTo(x, y);
         }
-        
+
         // Draw lower part (mirrored)
         for (let x = width - 1; x >= 0; x--) {
-            const sampleStart = Math.floor(startSample + x * samplesPerPixel);
-            const sampleEnd = Math.floor(startSample + (x + 1) * samplesPerPixel);
-            
-            let peak = 0;
-            const endIndex = Math.min(sampleEnd, amplitudeData.length);
-            
-            // Optimize for high-resolution data
-            const sampleCount = endIndex - sampleStart;
-            if (sampleCount > 100) {
-                const step = Math.max(1, Math.floor(sampleCount / 50));
-                for (let i = sampleStart; i < endIndex; i += step) {
-                    peak = Math.max(peak, Math.abs(amplitudeData[i]));
-                }
-            } else {
-                for (let i = sampleStart; i < endIndex; i++) {
-                    peak = Math.max(peak, Math.abs(amplitudeData[i]));
-                }
-            }
-            
+            const peak = this.getPeakForPixel(amplitudeData, startSample, x, samplesPerPixel);
             const y = centerY + (peak * scale);
-            ctx.lineTo(x, y);
+            this.ctx.lineTo(x, y);
         }
-        
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.stroke();
     }
-    
+
     drawFrequencyBands(startSample, endSample, width, height) {
-        this.drawFrequencyBandsToContext(this.ctx, startSample, endSample, width, height);
-    }
-    
-    drawFrequencyBandsToContext(ctx, startSample, endSample, width, height) {
         const centerY = height / 2;
-        const maxAmplitude = height * 0.45;
-        
-        // Get frequency band data
-        const lowData = this.waveformData.low || [];
-        const midData = this.waveformData.mid || [];
-        const highData = this.waveformData.high || [];
-        
+        const maxAmplitude = height * WaveformRenderer.CONSTANTS.MAX_AMPLITUDE_SCALE;
+
+        const lowData = this.state.waveformData.low || [];
+        const midData = this.state.waveformData.mid || [];
+        const highData = this.state.waveformData.high || [];
+
         if (lowData.length === 0 || midData.length === 0 || highData.length === 0) return;
-        
-        // Ensure all arrays have the same length as amplitude data
-        const amplitudeData = this.waveformData.amplitude || [];
-        if (lowData.length !== amplitudeData.length || 
-            midData.length !== amplitudeData.length || 
-            highData.length !== amplitudeData.length) {
-            console.warn('Frequency band data length mismatch with amplitude data');
+
+        // Validate data alignment
+        const amplitudeData = this.state.waveformData.amplitude || [];
+        if (!this.validateFrequencyDataAlignment(lowData, midData, highData, amplitudeData)) {
+            console.warn('Frequency band data length mismatch');
             return;
         }
-        
-        // Calculate samples per pixel - use same logic as amplitude waveform
-        const visibleSamples = endSample - startSample;
-        const samplesPerPixel = visibleSamples / width;
-        
-        // Use fixed amplitude scaling for frequency bands (calculated once)
-        if (!this.globalMaxLow) {
-            this.globalMaxLow = Math.max(lowData.reduce((max, val) => Math.max(max, val), 0), 0.001);
-            this.globalMaxMid = Math.max(midData.reduce((max, val) => Math.max(max, val), 0), 0.001);
-            this.globalMaxHigh = Math.max(highData.reduce((max, val) => Math.max(max, val), 0), 0.001);
+
+        const samplesPerPixel = (endSample - startSample) / width;
+
+        // Calculate global max values once
+        if (!this.cache.globalMaxLow) {
+            this.cache.globalMaxLow = Math.max(lowData.reduce((max, val) => Math.max(max, val), 0), 0.001);
+            this.cache.globalMaxMid = Math.max(midData.reduce((max, val) => Math.max(max, val), 0), 0.001);
+            this.cache.globalMaxHigh = Math.max(highData.reduce((max, val) => Math.max(max, val), 0), 0.001);
         }
-        
-        const maxLow = this.globalMaxLow;
-        const maxMid = this.globalMaxMid;
-        const maxHigh = this.globalMaxHigh;
-        
-        // Draw each frequency band as filled waveforms
+
+        // Define frequency bands
         const bands = [
-            { 
-                data: lowData, 
-                color: 'rgba(255, 60, 60, 0.8)',  // Bright red for bass
-                max: maxLow 
-            },
-            { 
-                data: midData, 
-                color: 'rgba(60, 255, 60, 0.8)',  // Bright green for mids
-                max: maxMid 
-            },
-            { 
-                data: highData, 
-                color: 'rgba(60, 120, 255, 0.8)',  // Bright blue for highs
-                max: maxHigh 
-            }
+            { data: lowData, color: 'rgba(255, 60, 60, 0.8)', max: this.cache.globalMaxLow },
+            { data: midData, color: 'rgba(60, 255, 60, 0.8)', max: this.cache.globalMaxMid },
+            { data: highData, color: 'rgba(60, 120, 255, 0.8)', max: this.cache.globalMaxHigh }
         ];
-        
+
+        // Draw each band
         bands.forEach(band => {
-            ctx.fillStyle = band.color;
-            ctx.strokeStyle = band.color.replace('0.8', '0.9');
-            ctx.lineWidth = 0.5;
-            
-            ctx.beginPath();
-            ctx.moveTo(0, centerY);
-            
-            // Draw upper part - use EXACT same pixel-to-sample mapping as amplitude
-            for (let x = 0; x < width; x++) {
-                const sampleStart = Math.floor(startSample + x * samplesPerPixel);
-                const sampleEnd = Math.floor(startSample + (x + 1) * samplesPerPixel);
-                
-                // Get peak value for this pixel - exact same logic as amplitude waveform
-                let peak = 0;
-                const endIndex = Math.min(sampleEnd, band.data.length);
-                const sampleCount = endIndex - sampleStart;
-                
-                if (sampleCount > 100) {
-                    const step = Math.max(1, Math.floor(sampleCount / 50));
-                    for (let i = sampleStart; i < endIndex; i += step) {
-                        const normalized = band.data[i] / band.max;
-                        peak = Math.max(peak, normalized);
-                    }
-                } else {
-                    for (let i = sampleStart; i < endIndex; i++) {
-                        const normalized = band.data[i] / band.max;
-                        peak = Math.max(peak, normalized);
-                    }
-                }
-                
-                const y = centerY - (peak * maxAmplitude); // Full amplitude range
-                if (x === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
-                }
-            }
-            
-            // Draw lower part (mirrored) - exact same logic
-            for (let x = width - 1; x >= 0; x--) {
-                const sampleStart = Math.floor(startSample + x * samplesPerPixel);
-                const sampleEnd = Math.floor(startSample + (x + 1) * samplesPerPixel);
-                
-                let peak = 0;
-                const endIndex = Math.min(sampleEnd, band.data.length);
-                const sampleCount = endIndex - sampleStart;
-                
-                if (sampleCount > 100) {
-                    const step = Math.max(1, Math.floor(sampleCount / 50));
-                    for (let i = sampleStart; i < endIndex; i += step) {
-                        const normalized = band.data[i] / band.max;
-                        peak = Math.max(peak, normalized);
-                    }
-                } else {
-                    for (let i = sampleStart; i < endIndex; i++) {
-                        const normalized = band.data[i] / band.max;
-                        peak = Math.max(peak, normalized);
-                    }
-                }
-                
-                const y = centerY + (peak * maxAmplitude);
-                ctx.lineTo(x, y);
-            }
-            
-            ctx.closePath();
-            ctx.fill();
+            this.drawFrequencyBand(band, startSample, samplesPerPixel, width, centerY, maxAmplitude);
         });
     }
-    
+
+    drawFrequencyBand(band, startSample, samplesPerPixel, width, centerY, maxAmplitude) {
+        this.ctx.fillStyle = band.color;
+        this.ctx.strokeStyle = band.color.replace('0.8', '0.9');
+        this.ctx.lineWidth = 0.5;
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, centerY);
+
+        // Draw upper part
+        for (let x = 0; x < width; x++) {
+            const peak = this.getFrequencyPeakForPixel(band.data, band.max, startSample, x, samplesPerPixel);
+            const y = centerY - (peak * maxAmplitude);
+            this.ctx.lineTo(x, y);
+        }
+
+        // Draw lower part (mirrored)
+        for (let x = width - 1; x >= 0; x--) {
+            const peak = this.getFrequencyPeakForPixel(band.data, band.max, startSample, x, samplesPerPixel);
+            const y = centerY + (peak * maxAmplitude);
+            this.ctx.lineTo(x, y);
+        }
+
+        this.ctx.closePath();
+        this.ctx.fill();
+    }
+
+    getPeakForPixel(data, startSample, x, samplesPerPixel) {
+        const sampleStart = Math.floor(startSample + x * samplesPerPixel);
+        const sampleEnd = Math.floor(startSample + (x + 1) * samplesPerPixel);
+        const endIndex = Math.min(sampleEnd, data.length);
+        const sampleCount = endIndex - sampleStart;
+
+        let peak = 0;
+
+        if (sampleCount > WaveformRenderer.CONSTANTS.HIGH_RES_SAMPLE_THRESHOLD) {
+            // Optimize for high-resolution data
+            const step = Math.max(1, Math.floor(sampleCount / WaveformRenderer.CONSTANTS.HIGH_RES_STEP_DIVISOR));
+            for (let i = sampleStart; i < endIndex; i += step) {
+                peak = Math.max(peak, Math.abs(data[i]));
+            }
+        } else {
+            // Normal resolution
+            for (let i = sampleStart; i < endIndex; i++) {
+                peak = Math.max(peak, Math.abs(data[i]));
+            }
+        }
+
+        return peak;
+    }
+
+    getFrequencyPeakForPixel(data, maxValue, startSample, x, samplesPerPixel) {
+        const sampleStart = Math.floor(startSample + x * samplesPerPixel);
+        const sampleEnd = Math.floor(startSample + (x + 1) * samplesPerPixel);
+        const endIndex = Math.min(sampleEnd, data.length);
+        const sampleCount = endIndex - sampleStart;
+
+        let peak = 0;
+
+        if (sampleCount > WaveformRenderer.CONSTANTS.HIGH_RES_SAMPLE_THRESHOLD) {
+            const step = Math.max(1, Math.floor(sampleCount / WaveformRenderer.CONSTANTS.HIGH_RES_STEP_DIVISOR));
+            for (let i = sampleStart; i < endIndex; i += step) {
+                const normalized = data[i] / maxValue;
+                peak = Math.max(peak, normalized);
+            }
+        } else {
+            for (let i = sampleStart; i < endIndex; i++) {
+                const normalized = data[i] / maxValue;
+                peak = Math.max(peak, normalized);
+            }
+        }
+
+        return peak;
+    }
+
     updatePlayhead() {
         if (!this.playheadCtx) return;
-        
-        // Clear entire overlay
+
+        // Clear overlay
         this.playheadCtx.clearRect(0, 0, this.playheadOverlay.width, this.playheadOverlay.height);
-        
-        // Draw playhead if we have a current time
-        if (this.currentTime > 0) {
-            const x = this.timeToPixel(this.currentTime);
+
+        if (this.state.currentTime > 0) {
+            const x = this.timeToPixel(this.state.currentTime);
             const width = this.playheadOverlay.width;
             const height = this.playheadOverlay.height;
-            
+
             if (x >= 0 && x <= width) {
                 this.playheadCtx.beginPath();
                 this.playheadCtx.strokeStyle = '#dc3545';
@@ -717,113 +615,246 @@ class WaveformRenderer {
             }
         }
     }
-    
+
     updateMarkers() {
         if (!this.markersContainer) return;
-        
+
         this.markersContainer.innerHTML = '';
-        
-        if (this.duration === 0) return;
-        
+
+        if (this.state.duration === 0) return;
+
         const width = this.markersContainer.clientWidth;
-        const visibleDuration = this.duration / this.zoomLevel;
-        
-        // Calculate marker interval based on zoom level
-        let interval = 1; // seconds
-        if (visibleDuration > 600) interval = 60;
-        else if (visibleDuration > 300) interval = 30;
-        else if (visibleDuration > 120) interval = 10;
-        else if (visibleDuration > 60) interval = 5;
-        else if (visibleDuration > 30) interval = 2;
-        else if (visibleDuration > 10) interval = 1;
-        else if (visibleDuration > 5) interval = 0.5;
-        else interval = 0.1;
-        
-        const startTime = this.scrollPosition * (this.duration - visibleDuration);
-        const endTime = startTime + visibleDuration;
-        
+        const visibleDuration = this.getVisibleDuration();
+        const interval = this.getMarkerInterval(visibleDuration);
+        const { start: startTime, end: endTime } = this.getVisibleTimeRange();
+
         for (let time = Math.ceil(startTime / interval) * interval; time <= endTime; time += interval) {
             const x = this.timeToPixel(time);
-            
+
             if (x >= 0 && x <= width) {
-                const marker = document.createElement('div');
-                marker.className = 'timeline-marker';
-                marker.style.left = x + 'px';
-                
-                // Major markers based on interval
-                const majorInterval = interval >= 1 ? interval * 5 : interval * 10;
-                const isMajor = Math.abs(time % majorInterval) < 0.001;
-                
-                if (isMajor) {
-                    marker.classList.add('major');
-                    
-                    const label = document.createElement('div');
-                    label.className = 'timeline-label';
-                    label.textContent = this.formatTime(time);
-                    label.style.left = x + 'px';
-                    this.markersContainer.appendChild(label);
-                }
-                
+                const marker = this.createMarker(time, x, interval);
                 this.markersContainer.appendChild(marker);
             }
         }
     }
-    
-    timeToPixel(time) {
-        if (this.duration === 0) return 0;
-        const visibleDuration = this.duration / this.zoomLevel;
-        const startTime = this.scrollPosition * (this.duration - visibleDuration);
-        return ((time - startTime) / visibleDuration) * this.canvas.width;
+
+    createMarker(time, x, interval) {
+        const marker = document.createElement('div');
+        marker.className = 'timeline-marker';
+        marker.style.left = `${x}px`;
+
+        const majorInterval = interval >= 1 ? interval * 5 : interval * 10;
+        const isMajor = Math.abs(time % majorInterval) < 0.001;
+
+        if (isMajor) {
+            marker.classList.add('major');
+
+            const label = document.createElement('div');
+            label.className = 'timeline-label';
+            label.textContent = this.formatTime(time);
+            label.style.left = `${x}px`;
+            this.markersContainer.appendChild(label);
+        }
+
+        return marker;
     }
-    
-    pixelToTime(pixel) {
-        if (this.duration === 0) return 0;
-        const visibleDuration = this.duration / this.zoomLevel;
-        const startTime = this.scrollPosition * (this.duration - visibleDuration);
-        return startTime + (pixel / this.canvas.width) * visibleDuration;
+
+    getMarkerInterval(visibleDuration) {
+        if (visibleDuration > 600) return 60;
+        if (visibleDuration > 300) return 30;
+        if (visibleDuration > 120) return 10;
+        if (visibleDuration > 60) return 5;
+        if (visibleDuration > 30) return 2;
+        if (visibleDuration > 10) return 1;
+        if (visibleDuration > 5) return 0.5;
+        return 0.1;
     }
-    
-    seekTo(time) {
-        // Dispatch seek event
-        const event = new CustomEvent('waveform-seek', { detail: { time } });
-        this.canvas.dispatchEvent(event);
+
+    startPlaybackAnimation() {
+        this.stopPlaybackAnimation();
+
+        let lastRender = 0;
+        const targetFPS = WaveformRenderer.CONSTANTS.PLAYHEAD_UPDATE_FPS;
+        const frameDelay = 1000 / targetFPS;
+
+        const animate = () => {
+            if (this.state.isPlaying) {
+                const now = performance.now();
+                if (now - lastRender >= frameDelay) {
+                    this.updatePlayhead();
+                    lastRender = now;
+                }
+                this.animationId = requestAnimationFrame(animate);
+            } else {
+                this.animationId = null;
+            }
+        };
+
+        this.animationId = requestAnimationFrame(animate);
     }
-    
-    showAddEventDialog(time) {
-        if (window.eventModal) {
-            window.eventModal.showAddDialog(time);
+
+    stopPlaybackAnimation() {
+        if (this.animationId) {
+            cancelAnimationFrame(this.animationId);
+            this.animationId = null;
         }
     }
-    
+
+    // Helper Methods
+    getAmplitudeData() {
+        if (!this.state.waveformData) return null;
+
+        if (this.state.waveformData.amplitude) {
+            return this.state.waveformData.amplitude;
+        }
+
+        if (Array.isArray(this.state.waveformData)) {
+            return this.state.waveformData;
+        }
+
+        return null;
+    }
+
+    hasFrequencyData() {
+        return this.state.waveformData &&
+               this.state.waveformData.low &&
+               this.state.waveformData.mid &&
+               this.state.waveformData.high;
+    }
+
+    validateFrequencyDataAlignment(lowData, midData, highData, amplitudeData) {
+        return lowData.length === amplitudeData.length &&
+               midData.length === amplitudeData.length &&
+               highData.length === amplitudeData.length;
+    }
+
+    getVisibleDuration() {
+        return this.state.duration / this.state.zoomLevel;
+    }
+
+    getVisibleTimeRange() {
+        const visibleDuration = this.getVisibleDuration();
+        const startTime = this.state.scrollPosition * (this.state.duration - visibleDuration);
+        const endTime = startTime + visibleDuration;
+
+        return { start: startTime, end: endTime };
+    }
+
+    getVisibleSampleRange(totalSamples) {
+        const visibleSamples = totalSamples / this.state.zoomLevel;
+        const startSample = Math.floor(this.state.scrollPosition * (totalSamples - visibleSamples));
+        const endSample = Math.min(totalSamples, startSample + visibleSamples);
+
+        return { startSample, endSample };
+    }
+
+    timeToPixel(time) {
+        if (this.state.duration === 0) return 0;
+
+        const visibleDuration = this.getVisibleDuration();
+        const startTime = this.state.scrollPosition * (this.state.duration - visibleDuration);
+
+        return ((time - startTime) / visibleDuration) * this.canvas.width;
+    }
+
+    pixelToTime(pixel) {
+        if (this.state.duration === 0) return 0;
+
+        const visibleDuration = this.getVisibleDuration();
+        const startTime = this.state.scrollPosition * (this.state.duration - visibleDuration);
+
+        return startTime + (pixel / this.canvas.width) * visibleDuration;
+    }
+
     formatTime(seconds) {
         const minutes = Math.floor(seconds / 60);
         const wholeSecs = Math.floor(seconds % 60);
-        
+
         if (seconds < 10 && seconds % 1 !== 0) {
-            // Show decimal for small values
             return `${seconds.toFixed(1)}s`;
+        }
+
+        return `${minutes}:${wholeSecs.toString().padStart(2, '0')}`;
+    }
+
+    seekTo(time) {
+        this.dispatchEvent('seek', { time });
+    }
+
+    showAddEventDialog(time) {
+        if (window.eventModal) {
+            window.eventModal.showAddDialog(time);
         } else {
-            return `${minutes}:${wholeSecs.toString().padStart(2, '0')}`;
+            console.warn('Event modal not available');
         }
     }
-    
-    // Method to refresh display when theme changes
+
     refreshTheme() {
         this.render();
     }
+
+    // Utility Methods
+    throttle(func, delay) {
+        let timeoutId = null;
+        let lastArgs = null;
+
+        return (...args) => {
+            lastArgs = args;
+
+            if (!timeoutId) {
+                timeoutId = setTimeout(() => {
+                    func.apply(this, lastArgs);
+                    timeoutId = null;
+                }, delay);
+            }
+        };
+    }
+
+    clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    dispatchEvent(eventName, detail = {}) {
+        const event = new CustomEvent(`waveform-${eventName}`, { detail });
+        this.canvas.dispatchEvent(event);
+    }
+
+    // Cleanup
+    destroy() {
+        this.flags.isDestroyed = true;
+
+        // Stop animation
+        this.stopPlaybackAnimation();
+
+        // Remove event listeners
+        this.canvas.removeEventListener('click', this.boundClick);
+        this.canvas.removeEventListener('contextmenu', this.boundContextMenu);
+        this.canvas.removeEventListener('wheel', this.boundWheel);
+        this.canvas.removeEventListener('mousedown', this.boundMouseDown);
+        document.removeEventListener('mousemove', this.boundMouseMove);
+        document.removeEventListener('mouseup', this.boundMouseUp);
+
+        window.removeEventListener('resize', this.resizeHandler);
+        window.removeEventListener('resize', this.overlayResizeHandler);
+
+        // Clear caches
+        this.cache.waveformCache.clear();
+
+        // Remove overlay
+        if (this.playheadOverlay && this.playheadOverlay.parentNode) {
+            this.playheadOverlay.parentNode.removeChild(this.playheadOverlay);
+        }
+    }
 }
 
-// Initialize waveform when DOM is ready
+// Module-level helper functions
 function initializeWaveform() {
     if (document.getElementById('waveformCanvas')) {
         window.waveformRenderer = new WaveformRenderer('waveformCanvas', 'waveformMarkers');
-        
-        // Set up synchronization with sequence editor
         setupTimelineSync();
     }
 }
 
-// Render waveform with data
 function renderWaveform(waveformData, duration = null) {
     if (window.waveformRenderer && waveformData) {
         const waveformDuration = duration || (currentSong ? currentSong.duration : 0);
@@ -831,41 +862,42 @@ function renderWaveform(waveformData, duration = null) {
     }
 }
 
-// Update timeline markers
 function updateTimeline() {
     if (window.waveformRenderer) {
         window.waveformRenderer.updateMarkers();
     }
 }
 
-// Set up synchronization between waveform and sequence editor
 function setupTimelineSync() {
     if (!window.waveformRenderer || !window.sequenceEditor) return;
-    
-    // Listen for waveform changes and sync to sequence editor
-    document.getElementById('waveformCanvas').addEventListener('waveform-zoom-change', (e) => {
-        if (window.sequenceEditor) {
-            window.sequenceEditor.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
-        }
-    });
-    
-    document.getElementById('waveformCanvas').addEventListener('waveform-scroll-change', (e) => {
-        if (window.sequenceEditor) {
-            window.sequenceEditor.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
-        }
-    });
-    
-    // Listen for sequence editor changes and sync to waveform
-    document.getElementById('sequenceContainer').addEventListener('sequence-zoom-change', (e) => {
-        if (window.waveformRenderer) {
-            window.waveformRenderer.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
-        }
-    });
-    
-    document.getElementById('sequenceContainer').addEventListener('sequence-scroll-change', (e) => {
-        if (window.waveformRenderer) {
-            window.waveformRenderer.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
-        }
-    });
-}
 
+    // Listen for waveform changes and sync to sequence editor
+    const waveformCanvas = document.getElementById('waveformCanvas');
+    const sequenceContainer = document.getElementById('sequenceContainer');
+
+    if (waveformCanvas && sequenceContainer) {
+        waveformCanvas.addEventListener('waveform-zoom-change', (e) => {
+            if (window.sequenceEditor) {
+                window.sequenceEditor.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
+            }
+        });
+
+        waveformCanvas.addEventListener('waveform-scroll-change', (e) => {
+            if (window.sequenceEditor) {
+                window.sequenceEditor.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
+            }
+        });
+
+        sequenceContainer.addEventListener('sequence-zoom-change', (e) => {
+            if (window.waveformRenderer) {
+                window.waveformRenderer.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
+            }
+        });
+
+        sequenceContainer.addEventListener('sequence-scroll-change', (e) => {
+            if (window.waveformRenderer) {
+                window.waveformRenderer.syncFromExternal(e.detail.zoomLevel, e.detail.scrollPosition);
+            }
+        });
+    }
+}
