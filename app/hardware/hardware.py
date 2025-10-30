@@ -3,9 +3,6 @@ import time
 import pygame
 import serial
 import sys
-import fcntl
-import termios
-import struct
 
 try:
     import RPi.GPIO as GPIO
@@ -118,7 +115,7 @@ class DMXController:
                 time.sleep(sleep_time)
 
     def _send_dmx_frame(self):
-        """Send a complete DMX512 frame"""
+        """Send a complete DMX512 frame using baudrate switching method"""
         if not self.serial_port or not self.serial_port.is_open:
             return
 
@@ -128,26 +125,19 @@ class DMXController:
                 packet = bytearray([0])  # Start code
                 packet.extend(self.dmx_data)  # Copy all 512 channels
 
-            fd = self.serial_port.fileno()
+            # DMX BREAK: Switch to lower baudrate and send 0x00
+            # At 90000 baud, one byte (with start/stop bits) = ~111µs
+            # This creates the BREAK signal
+            self.serial_port.baudrate = DMX_BREAK_BAUDRATE
+            self.serial_port.write(bytearray([0]))
+            self.serial_port.flush()
 
-            # Save current terminal settings BEFORE break
-            saved_attrs = termios.tcgetattr(fd)
+            # Mark After Break (MAB): Switch back to DMX baudrate
+            # Small delay ensures MAB timing (typically 8-12µs)
+            self.serial_port.baudrate = DMX_BAUDRATE
+            time.sleep(0.00001)  # 10µs MAB
 
-            # Send BREAK using ioctl
-            TIOCSBRK = 0x5427
-            TIOCCBRK = 0x5428
-
-            fcntl.ioctl(fd, TIOCSBRK)
-            time.sleep(0.00009)  # 90µs break
-            fcntl.ioctl(fd, TIOCCBRK)
-
-            # RESTORE terminal settings immediately after break
-            termios.tcsetattr(fd, termios.TCSANOW, saved_attrs)
-
-            # Mark After Break
-            time.sleep(0.00001)  # 10µs
-
-            # Write data
+            # Send DMX packet (start code + 512 channels)
             self.serial_port.write(packet)
             self.serial_port.flush()
 
