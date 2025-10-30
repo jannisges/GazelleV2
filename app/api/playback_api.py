@@ -251,3 +251,17 @@ def test_dmx():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@playback_api.route('/api/apply-default-values', methods=['POST'])
+def apply_default_values():
+    """Apply default DMX values to all patched devices"""
+    try:
+        # Only apply defaults if no sequence is playing
+        if not playback.is_playing:
+            playback.apply_default_values()
+            return jsonify({'success': True, 'message': 'Default values applied'})
+        else:
+            return jsonify({'success': False, 'message': 'Cannot apply defaults while sequence is playing'}), 400
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

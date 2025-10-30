@@ -90,7 +90,8 @@ def patch():
                 'name': pd.device.name,
                 'channels': device_channels,
                 'shape': pd.device.shape or 'circle',
-                'color': pd.device.color or '#ffffff'
+                'color': pd.device.color or '#ffffff',
+                'default_values': pd.device.default_values
             }
         })
     

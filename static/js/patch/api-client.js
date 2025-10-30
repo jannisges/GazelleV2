@@ -73,4 +73,19 @@ class PatchAPI {
     static async exportPatch() {
         return this.call('/api/export-patch');
     }
+
+    static async updateDeviceDefaultValues(device, defaultValues) {
+        return this.call('/api/save-device', 'POST', {
+            id: device.id,
+            name: device.name,
+            channels: device.channels,
+            shape: device.shape || 'circle',
+            color: device.color || '#ffffff',
+            default_values: defaultValues
+        });
+    }
+
+    static async applyDefaultValues() {
+        return this.call('/api/apply-default-values', 'POST');
+    }
 }

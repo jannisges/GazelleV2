@@ -657,11 +657,125 @@ class PatchManager {
     
     stopDragging() {
         this.selectionManager.stopDrag();
-        
+
         // Reset all address background colors
         document.querySelectorAll('.dmx-address').forEach(addr => {
             addr.style.backgroundColor = '';
         });
+    }
+
+    // === DEFAULT VALUES MANAGEMENT ===
+
+    editDefaultValues() {
+        if (!this.selectedPatch) return;
+
+        const device = this.selectedPatch.device;
+        const channels = this.parseDeviceChannels(device);
+        const defaultValues = device.default_values ? JSON.parse(device.default_values) : [];
+
+        const content = document.getElementById('defaultValuesContent');
+        if (!content) return;
+
+        let html = '';
+        channels.forEach((ch, i) => {
+            const currentValue = defaultValues[i] !== undefined ? defaultValues[i] : 0;
+            const dmxAddress = this.selectedPatch.start_address + i;
+
+            html += `
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="form-label mb-0">
+                            <span class="badge" style="background-color: ${this.getChannelTypeColor(ch.type)}">${ch.type}</span>
+                            Ch ${i + 1} (DMX ${dmxAddress})
+                        </label>
+                        <span class="badge bg-secondary" id="defaultValue_${i}">Value: ${currentValue}</span>
+                    </div>
+                    <input type="range"
+                           class="form-range default-value-slider"
+                           id="slider_${i}"
+                           min="0"
+                           max="255"
+                           value="${currentValue}"
+                           data-channel-index="${i}"
+                           oninput="updateDefaultValueDisplay(${i}, this.value)">
+                </div>
+            `;
+        });
+
+        content.innerHTML = html;
+
+        const modal = new bootstrap.Modal(document.getElementById('defaultValuesModal'));
+        modal.show();
+    }
+
+    updateDefaultValueDisplay(channelIndex, value) {
+        const badge = document.getElementById(`defaultValue_${channelIndex}`);
+        if (badge) {
+            badge.textContent = `Value: ${value}`;
+        }
+    }
+
+    resetDefaultValues() {
+        if (!this.selectedPatch) return;
+
+        const device = this.selectedPatch.device;
+        const channels = this.parseDeviceChannels(device);
+
+        channels.forEach((_, i) => {
+            const slider = document.getElementById(`slider_${i}`);
+            if (slider) {
+                slider.value = 0;
+                this.updateDefaultValueDisplay(i, 0);
+            }
+        });
+    }
+
+    async saveDefaultValues() {
+        if (!this.selectedPatch) return;
+
+        const device = this.selectedPatch.device;
+        const channels = this.parseDeviceChannels(device);
+        const defaultValues = [];
+
+        for (let i = 0; i < channels.length; i++) {
+            const slider = document.getElementById(`slider_${i}`);
+            if (slider) {
+                defaultValues.push(parseInt(slider.value));
+            } else {
+                defaultValues.push(0);
+            }
+        }
+
+        try {
+            const response = await PatchAPI.updateDeviceDefaultValues(device, defaultValues);
+            if (response.success) {
+                // Update the local device data
+                device.default_values = JSON.stringify(defaultValues);
+
+                bootstrap.Modal.getInstance(document.getElementById('defaultValuesModal')).hide();
+                this.showNotification('Default values saved successfully', 'success');
+
+                // Apply the default values to the fixtures immediately (if no playback is active)
+                try {
+                    const applyResponse = await PatchAPI.applyDefaultValues();
+                    if (applyResponse.success) {
+                        console.log('[DMX] Default values applied to fixtures');
+                    } else {
+                        console.log('[DMX] Could not apply defaults:', applyResponse.message);
+                    }
+                } catch (applyError) {
+                    console.error('[DMX] Error applying defaults:', applyError);
+                }
+
+                // Refresh the patched devices to ensure we have the latest data
+                await this.refreshPatchedDevices();
+            } else {
+                this.showNotification('Error saving default values: ' + response.error, 'error');
+            }
+        } catch (error) {
+            console.error('Error saving default values:', error);
+            this.showNotification('Error saving default values', 'error');
+        }
     }
 }
 
@@ -723,5 +837,29 @@ function toggleGrid() {
 function zoomToFit() {
     if (patchManager) {
         patchManager.zoomToFit();
+    }
+}
+
+function editDefaultValues() {
+    if (patchManager) {
+        patchManager.editDefaultValues();
+    }
+}
+
+function updateDefaultValueDisplay(channelIndex, value) {
+    if (patchManager) {
+        patchManager.updateDefaultValueDisplay(channelIndex, value);
+    }
+}
+
+function resetDefaultValues() {
+    if (patchManager) {
+        patchManager.resetDefaultValues();
+    }
+}
+
+function saveDefaultValues() {
+    if (patchManager) {
+        patchManager.saveDefaultValues();
     }
 }

@@ -107,6 +107,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-info" onclick="editDefaultValues()">Set Default Values</button>
                 <button type="button" class="btn btn-primary" onclick="editDevicePosition()">Edit Position</button>
             </div>
         </div>
@@ -143,6 +144,36 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="savePosition()">Save Position</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Default Values Edit Modal -->
+<div class="modal fade" id="defaultValuesModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Set Default DMX Values</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="Close" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <small class="text-muted">
+                        <i class="bi bi-info-circle"></i>
+                        These values will be displayed when no sequence is playing.
+                    </small>
+                </div>
+                <form id="defaultValuesForm">
+                    <div id="defaultValuesContent">
+                        <!-- Channel sliders will be generated here -->
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" onclick="resetDefaultValues()">Reset All to 0</button>
+                <button type="button" class="btn btn-primary" onclick="saveDefaultValues()">Save Default Values</button>
             </div>
         </div>
     </div>
