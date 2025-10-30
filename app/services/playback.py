@@ -190,6 +190,12 @@ def play_sequence(sequence, start_time=0):
     current_sequence = sequence
     is_playing = True
 
+    # Clear all DMX channels to 0 at the start of the sequence
+    if dmx_controller:
+        print("[INFO] Clearing all DMX channels to 0 before starting sequence")
+        dmx_controller.clear_all()
+        time.sleep(0.05)  # Brief delay to ensure clear is applied
+
     # Load and play audio
     if audio_player.load_song(sequence.song.file_path):
         print("[INFO] Audio loaded, starting playback")
@@ -205,12 +211,14 @@ def play_sequence(sequence, start_time=0):
 
 def sequence_playback_loop(sequence, start_time_offset=0):
     """Main loop for sequence playback"""
-    global is_playing
+    global is_playing, current_sequence
 
     events = sequence.get_events()
     events.sort(key=lambda x: x.get('time', 0))
 
-    print(f"[PLAYBACK] Starting sequence loop with {len(events)} events")
+    # Get song duration
+    song_duration = sequence.song.duration if sequence.song else 0
+    print(f"[PLAYBACK] Starting sequence loop with {len(events)} events, song duration: {song_duration}s")
 
     start_time = time.time()
     event_index = 0
@@ -222,8 +230,14 @@ def sequence_playback_loop(sequence, start_time_offset=0):
 
     print(f"[PLAYBACK] Starting from event index {event_index}")
 
-    while is_playing and (event_index < len(events) or active_events):
+    # Continue loop until song finishes (not just until last event)
+    while is_playing:
         current_time = time.time() - start_time + start_time_offset
+
+        # Check if song has finished
+        if current_time >= song_duration:
+            print(f"[PLAYBACK] Song finished at {current_time:.2f}s (duration: {song_duration}s)")
+            break
 
         # Execute new events
         while event_index < len(events):
@@ -258,6 +272,23 @@ def sequence_playback_loop(sequence, start_time_offset=0):
         time.sleep(0.01)  # 10ms precision
 
     print(f"[PLAYBACK] Sequence loop finished")
+
+    # Cleanup when sequence finishes naturally (not stopped by user)
+    if is_playing:
+        print("[PLAYBACK] Sequence completed - cleaning up and applying default values")
+        is_playing = False
+        current_sequence = None
+
+        # Clear all DMX channels first
+        if dmx_controller:
+            dmx_controller.clear_all()
+            time.sleep(0.05)  # Brief delay to ensure clear is applied
+            # Apply default values
+            apply_default_values()
+
+        # Stop audio player
+        if audio_player:
+            audio_player.stop()
 
 def execute_dmx_event(event):
     """Execute a single DMX event"""
@@ -371,9 +402,14 @@ def clear_dmx_event(event):
 
 def apply_default_values():
     """Apply default DMX values to all patched devices when no sequence is playing"""
-    global flask_app, dmx_controller
+    global flask_app, dmx_controller, is_playing
 
     if not flask_app or not dmx_controller:
+        return
+
+    # CRITICAL: Only apply defaults when NO sequence is playing
+    if is_playing:
+        print("[DMX] Skipping default values - sequence is playing")
         return
 
     print("[DMX] Applying default values to patched devices")
