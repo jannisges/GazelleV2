@@ -74,7 +74,9 @@ def system_settings():
             'max_sequences': 100,
             'backup_enabled': True,
             'debug_mode': False,
-            'dark_mode': False
+            'dark_mode': False,
+            'button_lock_duration': 0,  # 0 = disabled, otherwise lock duration in seconds
+            'button_lock_trigger': 'after_press'  # 'after_press' or 'after_sequence'
         }
         
         if os.path.exists(config_file):
@@ -113,6 +115,8 @@ def save_system_settings():
             'backup_enabled': data.get('backup_enabled', True),
             'debug_mode': data.get('debug_mode', False),
             'dark_mode': data.get('dark_mode', False),
+            'button_lock_duration': data.get('button_lock_duration', 0),
+            'button_lock_trigger': data.get('button_lock_trigger', 'after_press'),
             'updated_at': datetime.now().isoformat()
         }
         

@@ -1,6 +1,8 @@
 import threading
 import time
 import random
+import os
+import json
 from app.models.models import Playlist, Sequence, PatchedDevice, db
 from app.hardware.hardware import RPI_AVAILABLE, setup_gpio
 
@@ -18,6 +20,7 @@ audio_player = None
 flask_app = None
 playback_lock = threading.Lock()
 last_trigger_time = 0
+button_locked_until = 0  # Timestamp until which the button is locked
 current_playlist_index = 0  # Track which playlist we're on
 current_sequence_index = 0  # Track which sequence in playlist
 shuffled_sequence_order = []  # Store shuffled order for random mode
@@ -29,9 +32,27 @@ def init_playback(dmx_ctrl, audio_ctrl, app_instance=None):
     audio_player = audio_ctrl
     flask_app = app_instance
 
+def get_button_lock_settings():
+    """Get button lock settings from system settings"""
+    try:
+        config_dir = os.path.expanduser('~/.dmx_control')
+        config_file = os.path.join(config_dir, 'system.json')
+
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                settings = json.load(f)
+                return {
+                    'duration': settings.get('button_lock_duration', 0),
+                    'trigger': settings.get('button_lock_trigger', 'after_press')
+                }
+        return {'duration': 0, 'trigger': 'after_press'}
+    except Exception as e:
+        print(f"[ERROR] Failed to read button lock settings: {e}")
+        return {'duration': 0, 'trigger': 'after_press'}
+
 def button_handler():
     """Handle hardware button presses - simple edge detection with debouncing"""
-    global last_trigger_time
+    global last_trigger_time, button_locked_until
 
     if not RPI_AVAILABLE:
         return
@@ -55,10 +76,37 @@ def button_handler():
 
                 # Confirm button is still pressed
                 if GPIO.input(BUTTON_PIN) == GPIO.LOW:
+                    # Check if button is locked
+                    if current_time < button_locked_until:
+                        remaining_time = button_locked_until - current_time
+                        print(f"[INFO] Button is locked for {remaining_time:.1f} more seconds")
+                        # Wait for button release
+                        while GPIO.input(BUTTON_PIN) == GPIO.LOW:
+                            time.sleep(0.05)
+                        button_was_high = True
+                        time.sleep(0.1)
+                        continue
+
+                    # Check if a sequence is currently playing (when using after_sequence trigger)
+                    lock_settings = get_button_lock_settings()
+                    if is_playing and lock_settings['trigger'] == 'after_sequence':
+                        print(f"[INFO] Button press ignored - sequence is playing (after_sequence mode)")
+                        # Wait for button release
+                        while GPIO.input(BUTTON_PIN) == GPIO.LOW:
+                            time.sleep(0.05)
+                        button_was_high = True
+                        time.sleep(0.1)
+                        continue
+
                     # Check cooldown period
                     if current_time - last_trigger_time >= 2.0:
                         print(f"[INFO] Button pressed - triggering playback")
                         last_trigger_time = current_time
+
+                        # Apply button lock if configured to trigger after press
+                        if lock_settings['duration'] > 0 and lock_settings['trigger'] == 'after_press':
+                            button_locked_until = current_time + lock_settings['duration']
+                            print(f"[INFO] Button locked for {lock_settings['duration']} seconds after button press")
 
                         # Trigger playback in background to avoid blocking
                         threading.Thread(target=trigger_sequence_playback, daemon=True).start()
@@ -289,6 +337,13 @@ def sequence_playback_loop(sequence, start_time_offset=0):
         # Stop audio player
         if audio_player:
             audio_player.stop()
+
+        # Apply button lock after sequence completion if configured
+        lock_settings = get_button_lock_settings()
+        if lock_settings['duration'] > 0 and lock_settings['trigger'] == 'after_sequence':
+            global button_locked_until
+            button_locked_until = time.time() + lock_settings['duration']
+            print(f"[PLAYBACK] Button locked for {lock_settings['duration']} seconds after sequence completion")
 
 def execute_dmx_event(event):
     """Execute a single DMX event"""

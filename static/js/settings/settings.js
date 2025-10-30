@@ -360,6 +360,15 @@ function loadSystemSettings() {
             document.getElementById('autoStart').checked = settings.auto_start !== false;
             document.getElementById('enableLogging').checked = settings.enable_logging !== false;
             document.getElementById('darkMode').checked = settings.dark_mode === true;
+            document.getElementById('buttonLockDuration').value = settings.button_lock_duration || 0;
+
+            // Set button lock trigger
+            const trigger = settings.button_lock_trigger || 'after_press';
+            if (trigger === 'after_press') {
+                document.getElementById('lockAfterPress').checked = true;
+            } else {
+                document.getElementById('lockAfterSequence').checked = true;
+            }
         }
     })
     .catch(error => {
@@ -368,14 +377,19 @@ function loadSystemSettings() {
 }
 
 function saveSystemSettings() {
+    const buttonLockDuration = parseInt(document.getElementById('buttonLockDuration').value) || 0;
+    const buttonLockTrigger = document.querySelector('input[name="buttonLockTrigger"]:checked').value;
+
     const settings = {
         system_name: document.getElementById('systemName').value,
         timezone: document.getElementById('timezone').value,
         auto_start: document.getElementById('autoStart').checked,
         enable_logging: document.getElementById('enableLogging').checked,
-        dark_mode: document.getElementById('darkMode').checked
+        dark_mode: document.getElementById('darkMode').checked,
+        button_lock_duration: buttonLockDuration,
+        button_lock_trigger: buttonLockTrigger
     };
-    
+
     DMXUtils.apiCall('/api/save-system-settings', 'POST', settings)
     .then(response => {
         if (response.success) {

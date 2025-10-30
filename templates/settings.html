@@ -214,7 +214,39 @@
                     </label>
                 </div>
             </div>
-            
+
+            <div class="mb-3">
+                <label for="buttonLockDuration" class="form-label">Physical Button Lock Duration</label>
+                <div class="input-group mb-2">
+                    <input type="number" class="form-control" id="buttonLockDuration" min="0" max="300" step="1" value="0">
+                    <span class="input-group-text">seconds</span>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Lock button:</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="buttonLockTrigger" id="lockAfterPress" value="after_press" checked>
+                        <label class="form-check-label" for="lockAfterPress">
+                            After button is pressed
+                        </label>
+                        <small class="form-text text-muted d-block ms-4">
+                            Button locks immediately for the specified duration.
+                        </small>
+                    </div>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="radio" name="buttonLockTrigger" id="lockAfterSequence" value="after_sequence">
+                        <label class="form-check-label" for="lockAfterSequence">
+                            During and after sequence playback
+                        </label>
+                        <small class="form-text text-muted d-block ms-4">
+                            Button is locked while sequence plays, then remains locked for the specified duration after completion.
+                        </small>
+                    </div>
+                </div>
+                <small class="form-text text-muted">
+                    Set duration to 0 to disable button locking.
+                </small>
+            </div>
+
             <button class="btn btn-primary" onclick="saveSystemSettings()">
                 <i class="bi bi-save"></i> Save System Settings
             </button>
